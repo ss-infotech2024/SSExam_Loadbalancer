@@ -1,22 +1,12 @@
 // components/admin/ExamAttempts.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   FiArrowLeft, FiUsers, FiAward, FiTrendingUp, FiStar,
   FiAlertCircle, FiRefreshCw, FiCheckCircle, FiXCircle,
   FiClock, FiCalendar, FiUser, FiHash, FiTrash2, FiUserCheck, FiUserX
 } from "react-icons/fi";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-api.interceptors.request.use((cfg) => {
-  const t = localStorage.getItem("token");
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
-  return cfg;
-});
 
 const ExamAttempts = () => {
   const { id } = useParams();
@@ -41,7 +31,7 @@ const ExamAttempts = () => {
     setLoading(true);
     setError("");
     try {
-      const response = await api.get(`/admin/exams/${id}/attendees`);
+      const response = await API.get(`/admin/exams/${id}/attendees`);
       console.log("Attendees API Response:", response.data);
       setData(response.data);
     } catch (err) {
@@ -57,7 +47,7 @@ const ExamAttempts = () => {
 
     setResetting(studentId);
     try {
-      await api.delete(`/admin/exams/${id}/attempts/${studentId}/reschedule`);
+      await API.delete(`/admin/exams/${id}/attempts/${studentId}/reschedule`);
       alert(`Attempt reset successfully for ${studentName}`);
       fetchAttendees(); // Refresh data
     } catch (err) {

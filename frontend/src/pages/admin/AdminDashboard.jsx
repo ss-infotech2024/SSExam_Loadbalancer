@@ -1,37 +1,11 @@
 // pages/admin/AdminDashboard.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   Users, FileText, Award, Monitor, TrendingUp, Star,
   PlusCircle, Eye, Clock, Calendar, RefreshCw, AlertCircle,
 } from "lucide-react";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-api.interceptors.request.use((cfg) => {
-  const t = localStorage.getItem("token");
-  if (t) {
-    cfg.headers.Authorization = `Bearer ${t}`;
-  } else {
-    window.location.href = "/";
-    return Promise.reject();
-  }
-  return cfg;
-});
-
-api.interceptors.response.use(
-  (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = "/";
-    }
-    return Promise.reject(err);
-  }
-);
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -60,9 +34,9 @@ const AdminDashboard = () => {
     setError("");
     try {
       const [studentsRes, examsRes, resultsRes] = await Promise.all([
-        api.get("/admin/students"),
-        api.get("/admin/exams"),
-        api.get("/admin/results"),
+        API.get("/admin/students"),
+        API.get("/admin/exams"),
+        API.get("/admin/results"),
       ]);
 
       const students = studentsRes.data.students || [];

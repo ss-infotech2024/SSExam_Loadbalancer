@@ -1,38 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   Award, CheckCircle, XCircle, FileText, Calendar,
   RefreshCw, AlertCircle, Inbox, Star, TrendingUp,
 } from "lucide-react";
 import { StudentLayout } from "../../components/student/StudentLayout";
-
-// ─── Axios Instance (Same as StudentDashboard.jsx) ─────────────────────────────
-const api = axios.create({ 
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api" 
-});
-
-api.interceptors.request.use(cfg => {
-  const t = localStorage.getItem("token");
-  if (t) {
-    cfg.headers.Authorization = `Bearer ${t}`;
-  } else {
-    window.location.href = "/";
-    return Promise.reject();
-  }
-  return cfg;
-});
-
-api.interceptors.response.use(
-  r => r,
-  err => {
-    if (err.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = "/";
-    }
-    return Promise.reject(err);
-  }
-);
 
 // ─── Grade Styles ─────────────────────────────────────────────────────────────
 const GRADE_STYLE = {
@@ -102,7 +75,7 @@ const StudentResults = () => {
     }
 
     try {
-      const res = await api.get("/student/results");
+      const res = await API.get("/student/results");
       setResults(res.data.results || []);
     } catch (err) {
       console.error("Results fetch error:", err.response?.data || err);

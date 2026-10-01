@@ -16,17 +16,7 @@ import {
   UserCheck,
   UserX
 } from "lucide-react";
-import axios from "axios";
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-api.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem("token");
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
-  return cfg;
-});
-
+import API from "@/services/api";
 const DepartmentResults = () => {
   const [departments, setDepartments] = useState([]);
   const [selectedDepartment, setSelectedDepartment] = useState(null);
@@ -42,7 +32,7 @@ const DepartmentResults = () => {
   const fetchDepartmentStats = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/superadmin/department-stats");
+      const res = await API.get("/superadmin/department-stats");
       setDepartments(res.data.departments || []);
     } catch (err) {
       console.error("Error fetching department stats:", err);
@@ -56,7 +46,7 @@ const DepartmentResults = () => {
   const fetchDepartmentDetails = async (deptName) => {
     setDetailLoading(true);
     try {
-      const res = await api.get(`/superadmin/department/${deptName}/results`);
+      const res = await API.get(`/superadmin/department/${deptName}/results`);
       setDepartmentDetails(res.data);
       setSelectedDepartment(deptName);
     } catch (err) {

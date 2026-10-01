@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   Clock, Calendar, CheckCircle, BookOpen, Play, AlertCircle,
   Camera, X, ChevronRight, Award, FileText, Zap, RefreshCw, Trophy, BarChart3, Lock,
@@ -44,26 +44,6 @@ const formatISTFull = (isoString) => {
     hour12: true,
   });
 };
-
-// ─── Axios ─────────────────────────────────────────────────────────────────────
-const api = axios.create({ 
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api" 
-});
-
-api.interceptors.request.use(cfg => {
-  const t = localStorage.getItem("token");
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
-  else { window.location.href = "/"; return Promise.reject(); }
-  return cfg;
-});
-
-api.interceptors.response.use(r => r, err => {
-  if (err.response?.status === 401) { 
-    localStorage.clear(); 
-    window.location.href = "/"; 
-  }
-  return Promise.reject(new Error(err.response?.data?.message || err.message));
-});
 
 // ─── Countdown Hook ───────────────────────────────────────────────────────────
 const useCountdown = (targetISO) => {
@@ -332,7 +312,7 @@ const StudentDashboard = () => {
     setLoading(true);
     setError("");
     try {
-      const res = await api.get("/student/exams");
+      const res = await API.get("/student/exams");
       const examList = res.data.exams || [];
       setExams(examList);
 
@@ -340,7 +320,7 @@ const StudentDashboard = () => {
       await Promise.all(
         examList.map(async (exam) => {
           try {
-            const statusRes = await api.get(`/student/exams/${exam._id}/attempt-status`);
+            const statusRes = await API.get(`/student/exams/${exam._id}/attempt-status`);
             if (statusRes.data.attempted) {
               attemptStatuses[exam._id] = true;
             }
@@ -351,7 +331,7 @@ const StudentDashboard = () => {
       );
       setAttemptMap(attemptStatuses);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
     } finally {
       setLoading(false);
     }

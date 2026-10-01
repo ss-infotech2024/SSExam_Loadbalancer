@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   FiUser, FiLock, FiBookOpen, FiPlusCircle,
   FiCheckCircle, FiMail, FiEye, FiEyeOff, FiUsers,
@@ -9,71 +9,49 @@ import {
 } from "react-icons/fi";
 import * as XLSX from "xlsx";
 
-// ─── AXIOS INSTANCE ───────────────────────────────────────────────────────────
-const axiosInstance = axios.create({
-  // baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api" || "http://localhost:5000/api",
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  } else {
-    window.location.href = "/";
-    return Promise.reject(new Error("Not authenticated"));
-  }
-  return config;
-});
-
-axiosInstance.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userRole");
-      localStorage.removeItem("adminDepartment");
-      window.location.href = "/";
-      return Promise.reject(new Error("Session expired. Please log in again."));
-    }
-    const message =
-      err.response?.data?.message ||
-      err.response?.data?.errors?.[0]?.msg ||
-      err.message ||
-      "Something went wrong";
-    return Promise.reject(new Error(message));
-  }
-);
+// Turn axios errors into Error(message) so callers can show err.message
+const toError = (err) => {
+  throw new Error(
+    err.response?.data?.message ||
+    err.response?.data?.errors?.[0]?.msg ||
+    err.message ||
+    "Something went wrong"
+  );
+};
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const api = {
   fetchStudents: (department) =>
-    axiosInstance
+    API
       .get("/admin/students", { params: { department } })
-      .then((r) => r.data),
+      .then((r) => r.data)
+      .catch(toError),
 
   createStudent: (body) =>
-    axiosInstance
+    API
       .post("/admin/create-student", body)
-      .then((r) => r.data),
+      .then((r) => r.data)
+      .catch(toError),
 
   // Bulk upload — backend sends Excel binary directly
   bulkAddStudents: (file) => {
     const fd = new FormData();
     fd.append("excelFile", file);
-    return axiosInstance
+    return API
       .post("/admin/students/bulk", fd, { responseType: "blob" })
-      .then((r) => r);
+      .then((r) => r)
+      .catch(toError);
   },
 
   // ✅ NEW: Download all students with passwords from backend
   downloadAllStudents: (department) =>
-    axiosInstance
+    API
       .get("/admin/students/download-all", {
         params: { department },
         responseType: "blob",
       })
-      .then((r) => r),
+      .then((r) => r)
+      .catch(toError),
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────

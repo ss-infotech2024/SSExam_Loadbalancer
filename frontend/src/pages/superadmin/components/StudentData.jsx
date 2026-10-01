@@ -1,20 +1,10 @@
 // pages/admin/StudentData.jsx
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import API from "@/services/api";
 import {
   Search, Download, Eye, Mail, Phone, GraduationCap, Calendar,
   TrendingUp, TrendingDown, X, UserCheck, UserX, BarChart2, Users
 } from "lucide-react";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-api.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem("token");
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
-  return cfg;
-});
 
 const StudentData = () => {
   const [departments, setDepartments] = useState([]);
@@ -29,7 +19,7 @@ const StudentData = () => {
   const fetchDepartmentStats = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/superadmin/department-stats");
+      const res = await API.get("/superadmin/department-stats");
       setDepartments(res.data.departments || []);
     } catch (err) {
       console.error("Error fetching department stats:", err);
@@ -43,7 +33,7 @@ const StudentData = () => {
   const fetchDepartmentDetails = async (deptName) => {
     setDetailLoading(true);
     try {
-      const res = await api.get(`/superadmin/department/${deptName}/results`);
+      const res = await API.get(`/superadmin/department/${deptName}/results`);
       setDepartmentDetails(res.data);
       setSelectedDepartment(deptName);
     } catch (err) {

@@ -1,8 +1,6 @@
 // store/slices/examSlice.js
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import API from "../../services/api";
-import axios from "axios";
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 // ─── Async Thunks ─────────────────────────────────────────────────────────────
 
 // Admin — fetch all exams in their department
@@ -54,16 +52,9 @@ export const createExamFromExcel = createAsyncThunk(
       const formData = new FormData();
       formData.append("examFile", file);
 
-      const token = localStorage.getItem("token");
-
-      const response = await axios.post(
-        `${BASE_URL}/admin/exams/upload`,
-        formData,
-        {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          // DO NOT set Content-Type here
-        }
-      );
+      // Token is attached by the API interceptor.
+      // DO NOT set Content-Type here — the browser adds the multipart boundary.
+      const response = await API.post("/admin/exams/upload", formData);
 
       return response.data;
     } catch (error) {

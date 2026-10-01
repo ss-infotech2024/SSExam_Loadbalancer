@@ -1,38 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   FiAlertCircle, FiUsers, FiTrendingUp, FiAward,
   FiDownload, FiSearch, FiRefreshCw,
   FiChevronLeft, FiBarChart2, FiStar,FiChevronDown,FiChevronUp,
   FiUser, FiHash, FiX, FiFilter
 } from "react-icons/fi";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-api.interceptors.request.use((cfg) => {
-  const t = localStorage.getItem("token");
-  if (t) {
-    cfg.headers.Authorization = `Bearer ${t}`;
-  } else {
-    window.location.href = "/";
-    return Promise.reject();
-  }
-  return cfg;
-});
-
-api.interceptors.response.use(
-  (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = "/";
-    }
-    return Promise.reject(err);
-  }
-);
 
 // ─── CSV helper ───────────────────────────────────────────────────────────────
 const downloadCSV = (rows, filename) => {
@@ -149,7 +123,7 @@ const StudentScores = () => {
 
   const fetchExams = async () => {
     try {
-      const response = await api.get("/admin/exams");
+      const response = await API.get("/admin/exams");
       setExams(response.data.exams || []);
     } catch (err) {
       console.error("Error fetching exams:", err);
@@ -160,7 +134,7 @@ const StudentScores = () => {
     setLoading(true);
     setError("");
     try {
-      const response = await api.get("/admin/results");
+      const response = await API.get("/admin/results");
       setResults(response.data.results || []);
       setSummary(response.data.summary || {});
     } catch (err) {
@@ -179,7 +153,7 @@ const StudentScores = () => {
     setLoading(true);
     setError("");
     try {
-      const response = await api.get(`/admin/results/exam/${examId}`);
+      const response = await API.get(`/admin/results/exam/${examId}`);
       setResults(response.data.results || []);
       setSummary({
         totalResults: response.data.summary?.totalStudents || 0,

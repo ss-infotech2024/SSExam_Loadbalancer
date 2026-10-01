@@ -1,12 +1,16 @@
 import axios from "axios";
 
+// 🔹 Backend URL comes from VITE_API_URL (frontend/.env locally, Vercel env vars in production)
+if (!import.meta.env.VITE_API_URL) {
+  console.warn("VITE_API_URL is not set — API requests will go to the frontend origin.");
+}
+
 // Create Axios instance
+// No default Content-Type: axios sets application/json for plain objects automatically,
+// and a forced JSON header would make axios serialize FormData uploads as JSON.
 const API = axios.create({
-  baseURL: "http://localhost:5000/api", // 🔹 Change when deployed
+  baseURL: import.meta.env.VITE_API_URL,
   withCredentials: true,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 // 🔐 Automatically attach token to every request

@@ -1,72 +1,49 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   FaEdit, FaTrash, FaKey, FaTimes, FaCheckCircle,
   FaExclamationTriangle, FaUserGraduate, FaSearch,
 } from "react-icons/fa";
 import { FiRefreshCw, FiAlertCircle } from "react-icons/fi";
 
-// ─── AXIOS INSTANCE ───────────────────────────────────────────────────────────
-const axiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-});
-
-axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  } else {
-    window.location.href = "/";
-    return Promise.reject(new Error("Not authenticated"));
-  }
-  return config;
-});
-
-axiosInstance.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userRole");
-      localStorage.removeItem("adminDepartment");
-      window.location.href = "/";
-      return Promise.reject(new Error("Session expired. Please log in again."));
-    }
-    const message =
-      err.response?.data?.message ||
-      err.response?.data?.errors?.[0]?.msg ||
-      err.message ||
-      "Something went wrong";
-    return Promise.reject(new Error(message));
-  }
-);
+// Turn axios errors into Error(message) so callers can show err.message
+const toError = (err) => {
+  throw new Error(
+    err.response?.data?.message ||
+    err.response?.data?.errors?.[0]?.msg ||
+    err.message ||
+    "Something went wrong"
+  );
+};
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const api = {
   // GET /api/admin/students?status=active&search=john
   fetchStudents: (params) =>
-    axiosInstance.get("/admin/students", { params }).then((r) => r.data),
+    API.get("/admin/students", { params }).then((r) => r.data).catch(toError),
 
   // PUT /api/admin/students/:id
   updateStudent: (id, body) =>
-    axiosInstance.put(`/admin/students/${id}`, body).then((r) => r.data),
+    API.put(`/admin/students/${id}`, body).then((r) => r.data).catch(toError),
 
   // DELETE /api/admin/students/:id
   deleteStudent: (id) =>
-    axiosInstance.delete(`/admin/students/${id}`).then((r) => r.data),
+    API.delete(`/admin/students/${id}`).then((r) => r.data).catch(toError),
 
   // PATCH /api/admin/students/:id/password
   changePassword: (id, newPassword) =>
-    axiosInstance
+    API
       .patch(`/admin/students/${id}/password`, { newPassword })
-      .then((r) => r.data),
+      .then((r) => r.data)
+      .catch(toError),
 
   // PATCH /api/admin/students/bulk-password
   bulkChangePassword: (newPassword) =>
-    axiosInstance
+    API
       .patch("/admin/students/bulk-password", { newPassword })
-      .then((r) => r.data),
+      .then((r) => r.data)
+      .catch(toError),
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────

@@ -1,18 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "@/services/api";
 import {
   Clock, AlertCircle, ChevronLeft, ChevronRight,
   CheckCircle, XCircle, Send, AlertTriangle,
   Camera, CameraOff, Trophy
 } from "lucide-react";
-
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api" });
-api.interceptors.request.use(cfg => {
-  const t = localStorage.getItem("token");
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
-  return cfg;
-});
 
 const Studentexams = ({ exam, onExamEnd }) => {
   const navigate = useNavigate();
@@ -156,7 +149,7 @@ const Studentexams = ({ exam, onExamEnd }) => {
         };
       });
 
-      const response = await api.post(`/student/exams/${exam._id}/submit`, {
+      const response = await API.post(`/student/exams/${exam._id}/submit`, {
         answers: formattedAnswers
       });
 

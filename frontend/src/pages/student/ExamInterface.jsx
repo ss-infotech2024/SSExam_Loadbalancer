@@ -7,36 +7,10 @@ import {
   Eye, EyeOff, UserCheck, UserX, Wifi, WifiOff, Camera, Play,
   RefreshCw,
 } from "lucide-react";
-import axios from "axios";
+import API from "@/services/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-
-const api = axios.create({
-  baseURL: API_URL,
-  timeout: 30000,
-  headers: { "Content-Type": "application/json" },
-});
-
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    } else {
-      window.location.href = "/";
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error("API Error:", error.response?.status, error.response?.data);
-    return Promise.reject(error);
-  }
-);
+// Exam requests keep their own timeout (applied per request on the shared API instance)
+const EXAM_REQUEST_TIMEOUT = 30000;
 
 // ─── Script loader ─────────────────────────────────────────────────────────
 const loadScript = (src) =>
@@ -189,7 +163,7 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
     };
 
     try {
-      const res  = await api.post(`/student/exams/${exam._id}/submit`, payload);
+      const res  = await API.post(`/student/exams/${exam._id}/submit`, payload, { timeout: EXAM_REQUEST_TIMEOUT });
       const data = res.data.result || res.data;
 
       const timeTaken = ((exam?.duration || 60) * 60) - timeRemainingRef.current;
@@ -361,7 +335,7 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
     setPhase("fetching");
     setFetchStatus("Fetching exam questions...");
 
-    api.get(`/student/exams/${exam._id}`)
+    API.get(`/student/exams/${exam._id}`, { timeout: EXAM_REQUEST_TIMEOUT })
       .then((res) => {
         if (!isMountedRef.current) return;
         const data = res.data.exam || res.data.data || res.data;
