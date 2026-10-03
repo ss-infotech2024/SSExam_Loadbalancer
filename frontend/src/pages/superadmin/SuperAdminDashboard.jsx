@@ -1,45 +1,35 @@
 // pages/superadmin/SuperAdminDashboard.jsx
-import React, { useState } from "react";
-import Sidebar from "../../components/superadmin/Sidebar";
+// The active section comes from the URL (/superadmin/<section>), so refresh and deep links work.
+import React from "react";
+import { useLocation } from "react-router-dom";
+import AppShell from "../../components/layout/AppShell";
+import { SUPERADMIN_NAV } from "../../components/layout/navConfig";
+import Overview from "./components/Overview";
 import AdminManagement from "./components/AdminManagement";
 import StudentData from "./components/StudentData";
 import DepartmentResults from "./components/DepartmentResults";
-import Settings from "./components/Settings";
+
+const SECTIONS = {
+  dashboard:   Overview,
+  admins:      AdminManagement,
+  students:    StudentData,
+  departments: DepartmentResults,
+};
 
 const SuperAdminDashboard = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState("admins"); // Default to Admin Management
-
-  const renderContent = () => {
-    switch (activeTab) {
-      case "admins":
-        return <AdminManagement />;
-      case "students":
-        return <StudentData />;
-      case "departments":
-        return <DepartmentResults />;
-      case "settings":
-        return <Settings />;
-      default:
-        return <AdminManagement />; // Fallback to Admin Management
-    }
-  };
+  const { pathname } = useLocation();
+  const section = pathname.split("/")[2];
+  const Content = SECTIONS[section] || Overview;
 
   return (
-    <div className="flex bg-gray-50 min-h-screen">
-      <Sidebar 
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        sidebarOpen={sidebarOpen}
-        setSidebarOpen={setSidebarOpen}
-      />
-      
-      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-72' : 'ml-20'}`}>
-        <div className="p-8">
-          {renderContent()}
-        </div>
-      </div>
-    </div>
+    <AppShell
+      nav={SUPERADMIN_NAV}
+      roleLabel="Super admin"
+      user={{ name: "Super Admin", meta: "All departments" }}
+      title={SECTIONS[section] ? undefined : "Dashboard"}
+    >
+      <Content />
+    </AppShell>
   );
 };
 

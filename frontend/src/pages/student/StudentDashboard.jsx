@@ -2,281 +2,236 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "@/services/api";
 import {
-  Clock, Calendar, CheckCircle, BookOpen, Play, AlertCircle,
-  Camera, X, ChevronRight, Award, FileText, Zap, RefreshCw, Trophy, BarChart3, Lock,
+  Clock, CalendarDays, CheckCircle2, BookOpen, Play, Camera, Lock, BarChart3, Radio, FileText, Award,
+  Maximize, ShieldCheck, VideoOff, Video, Inbox, KeyRound, Eye, UserX, MonitorX,
 } from "lucide-react";
 import { StudentLayout } from "../../components/student/StudentLayout";
 import ExamInterface from "./ExamInterface";
+import {
+  Button, Card, StatCard, Tabs, Badge, ExamStatusBadge, Modal, Alert, EmptyState, ErrorState, Skeleton,
+} from "../../components/ui";
+import { formatDateTimeShortIST, formatTimeIST, formatWeekdayIST, isTodayIST } from "../../utils/time";
+import { cn } from "../../utils/cn";
 
-// ─── IST Timezone Helpers (Consistent with EditExam.jsx) ─────────────────────
-
-const formatISTDateTime = (isoString) => {
-  if (!isoString) return "";
-  return new Date(isoString).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
-
-const formatISTTime = (isoString) => {
-  if (!isoString) return "";
-  return new Date(isoString).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
-
-const formatISTFull = (isoString) => {
-  if (!isoString) return "";
-  return new Date(isoString).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
-
-// ─── Countdown Hook ───────────────────────────────────────────────────────────
-const useCountdown = (targetISO) => {
-  const calc = () => {
-    if (!targetISO) return { h: 0, m: 0, s: 0, over: true };
-    const diff = new Date(targetISO) - new Date();
-    if (diff <= 0) return { h: 0, m: 0, s: 0, over: true };
-    return {
-      h: Math.floor(diff / 3600000),
-      m: Math.floor((diff % 3600000) / 60000),
-      s: Math.floor((diff % 60000) / 1000),
-      over: false,
-    };
+// ─── Countdown ────────────────────────────────────────────────────────────────
+const calcCountdown = (targetISO) => {
+  if (!targetISO) return { h: 0, m: 0, s: 0, over: true };
+  const diff = new Date(targetISO) - new Date();
+  if (diff <= 0) return { h: 0, m: 0, s: 0, over: true };
+  return {
+    h: Math.floor(diff / 3600000),
+    m: Math.floor((diff % 3600000) / 60000),
+    s: Math.floor((diff % 60000) / 1000),
+    over: false,
   };
+};
 
-  const [cd, setCd] = useState(calc);
+const useCountdown = (targetISO) => {
+  const [cd, setCd] = useState(() => calcCountdown(targetISO));
   useEffect(() => {
-    const t = setInterval(() => setCd(calc()), 1000);
+    const t = setInterval(() => setCd(calcCountdown(targetISO)), 1000);
     return () => clearInterval(t);
   }, [targetISO]);
-
   return cd;
 };
 
-// ─── Status Config ────────────────────────────────────────────────────────────
-const statusCfg = {
-  active:    { label: "Live Now",  bg: "bg-green-100",  text: "text-green-700",  dot: "bg-green-500" },
-  upcoming:  { label: "Upcoming",  bg: "bg-blue-100",   text: "text-blue-700",   dot: "bg-blue-500"  },
-  completed: { label: "Completed", bg: "bg-gray-100",   text: "text-gray-500",   dot: "bg-gray-400"  },
-};
-
-// ─── StatCard Component (This was missing - causing the error) ───────────────
-const StatCard = ({ label, value, icon: Icon, color, bg, sub }) => (
-  <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md transition-shadow">
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</p>
-        <p className={`text-3xl font-bold mt-1 ${color}`}>{value}</p>
-        {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
-      </div>
-      <div className={`w-11 h-11 ${bg} rounded-xl flex items-center justify-center`}>
-        <Icon className={`w-5 h-5 ${color}`} />
-      </div>
-    </div>
-  </div>
-);
-
-// ─── Countdown Badge ─────────────────────────────────────────────────────────
 const CountdownBadge = ({ startTime }) => {
   const { h, m, s, over } = useCountdown(startTime);
-  if (over) return <span className="text-xs font-mono font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg">Starting now…</span>;
-
-  return (
-    <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
-      {h > 0 ? `${h}h ` : ""}{String(m).padStart(2, "0")}m {String(s).padStart(2, "0")}s
-    </span>
-  );
+  if (over) return <Badge tone="success" dot pulse>Starting now</Badge>;
+  const d = Math.floor(h / 24);
+  const label = d > 0
+    ? `${d}d ${h % 24}h`
+    : `${h > 0 ? `${h}h ` : ""}${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  return <Badge tone="info" icon={Clock} className="font-mono tabular">{label}</Badge>;
 };
 
 // ─── Guidelines Modal ────────────────────────────────────────────────────────
-const GuidelinesModal = ({ exam, onStart, onClose, starting }) => (
-  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl">
-      <div className="p-6 border-b flex justify-between items-start">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">Before You Begin</h2>
-          <p className="text-sm text-blue-600 font-semibold mt-0.5">{exam?.subject}</p>
-        </div>
-        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl"><X className="w-4 h-4" /></button>
-      </div>
+const GuidelinesModal = ({ exam, onStart, onClose, starting, error }) => {
+  const cameraOn = exam?.cameraEnabled !== false;
+  const [agreed, setAgreed] = useState(false);
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+  const requirements = [
+    cameraOn && {
+      icon: Camera, title: "Camera access",
+      text: "Your browser will ask for camera permission. Your face must stay visible and centred for the whole exam.",
+    },
+    {
+      icon: Maximize, title: "Fullscreen mode",
+      text: "The exam runs in fullscreen. Leaving fullscreen counts as a violation.",
+    },
+    {
+      icon: ShieldCheck, title: "Active proctoring",
+      text: cameraOn
+        ? "Face, gaze and eye checks run continuously, along with tab-switch and keyboard monitoring."
+        : "Camera proctoring is off for this exam. Tab-switch, fullscreen and keyboard monitoring still apply.",
+    },
+  ].filter(Boolean);
+
+  const violations = [
+    { icon: MonitorX, text: "Switching tabs or exiting fullscreen" },
+    { icon: KeyRound, text: "Blocked keys (Esc, F11, Ctrl+W/R/T, Alt+Tab) or right-click" },
+    cameraOn && { icon: UserX, text: "No face, or more than one face, in view" },
+    cameraOn && { icon: Eye, text: "Looking away or eyes closed for long periods" },
+  ].filter(Boolean);
+
+  return (
+    <Modal
+      onClose={onClose}
+      dismissible={!starting}
+      size="lg"
+      icon={ShieldCheck}
+      title="Before you begin"
+      description={exam?.subject}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={starting}>Not now</Button>
+          <Button icon={cameraOn ? Camera : Play} onClick={onStart} loading={starting} disabled={!agreed} size="lg">
+            {starting ? "Starting…" : cameraOn ? "Allow camera & start" : "Start exam"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-6">
+        {/* Exam facts */}
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { icon: Clock,    label: "Duration",  val: `${exam?.duration} min`,       bg: "bg-blue-50 text-blue-600"   },
-            { icon: FileText, label: "Questions", val: exam?.questionCount ?? "—",     bg: "bg-purple-50 text-purple-600"},
-            { icon: Award,    label: "Per Q",     val: `${exam?.marksPerQuestion || 1} marks`, bg: "bg-green-50 text-green-600" },
-            { icon: Calendar, label: "Ends",      val: formatISTTime(exam?.endTime), bg: "bg-orange-50 text-orange-600" },
-          ].map(({ icon: Icon, label, val, bg }) => (
-            <div key={label} className={`${bg} rounded-xl p-3.5 flex items-center gap-3`}>
-              <Icon className="w-4 h-4 shrink-0" />
-              <div>
-                <p className="text-[11px] font-medium opacity-70">{label}</p>
-                <p className="text-sm font-bold">{val}</p>
-              </div>
+            { icon: Clock,        label: "Duration",  val: `${exam?.duration} min` },
+            { icon: FileText,     label: "Questions", val: exam?.questionCount ?? "—" },
+            { icon: Award,        label: "Marks",     val: `${(exam?.questionCount ?? 0) * (exam?.marksPerQuestion || 1)} (${exam?.marksPerQuestion || 1}/Q)` },
+            { icon: CalendarDays, label: "Closes at", val: `${formatTimeIST(exam?.endTime)} IST` },
+          ].map(({ icon: Icon, label, val }) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <dt className="flex items-center gap-1.5 text-xs text-slate-500"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-slate-900">{val}</dd>
             </div>
           ))}
-        </div>
+        </dl>
 
-        <div className="bg-slate-50 rounded-xl p-4">
-          <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Exam Rules</p>
-          <ul className="space-y-2">
-            {[
-              "⚠️ You can attempt this exam ONLY ONCE",
-              "Camera must stay active — face must be visible at all times",
-              "Do not switch tabs or exit fullscreen during the exam",
-              "Only one person should be visible to the camera",
-              "No negative marking — attempt all questions",
-              "5 proctoring violations = automatic termination",
-            ].map((r, i) => (
-              <li key={i} className="flex items-start gap-2.5 text-sm text-slate-600">
-                <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold mt-0.5">{i+1}</span>
-                {r}
+        {/* Requirements */}
+        <section>
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">What you'll need</h3>
+          <ul className="space-y-3">
+            {requirements.map(({ icon: Icon, title, text }) => (
+              <li key={title} className="flex gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                  <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{title}</p>
+                  <p className="text-sm text-slate-600">{text}</p>
+                </div>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
 
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-2.5">
-          <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-          <p className="text-xs text-red-700 font-medium">
-            Clicking "Start Exam" will request camera access and enter fullscreen mode.
-          </p>
-        </div>
+        {/* Rules */}
+        <section>
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">Exam rules</h3>
+          <ol className="space-y-2 text-sm text-slate-700">
+            {[
+              "You can attempt this exam only once.",
+              "There is no negative marking — answer every question.",
+              "Your answers are submitted automatically when the timer reaches zero.",
+              cameraOn && "Sit in a well-lit place. Only you should be visible to the camera.",
+            ].filter(Boolean).map((rule, i) => (
+              <li key={rule} className="flex gap-2.5">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">{i + 1}</span>
+                {rule}
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        {/* Violations */}
+        <Alert tone="warning" title="5 warnings = automatic submission">
+          <p className="mb-2">Each of these adds a warning. On the 5th warning your exam is submitted automatically with the answers saved so far.</p>
+          <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            {violations.map(({ icon: Icon, text }) => (
+              <li key={text} className="flex items-start gap-2 text-xs">
+                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{text}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+
+        {error && <Alert tone="danger" title="Camera access needed">{error}</Alert>}
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3.5 hover:bg-slate-50">
+          <input
+            type="checkbox"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-brand-600"
+          />
+          <span className="text-sm text-slate-700">
+            I have read the rules and understand that {cameraOn ? "my camera, screen and keyboard activity" : "my screen and keyboard activity"} will be monitored.
+          </span>
+        </label>
       </div>
+    </Modal>
+  );
+};
 
-      <div className="p-5 border-t flex gap-3">
-        <button 
-          onClick={onClose}
-          className="flex-1 py-2.5 border-2 border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-        >
-          Not Now
-        </button>
-        <button 
-          onClick={onStart} 
-          disabled={starting}
-          className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
-        >
-          {starting ? <><RefreshCw className="w-4 h-4 animate-spin" />Starting…</> : <><Camera className="w-4 h-4" />Start Exam</>}
-        </button>
-      </div>
-    </div>
-  </div>
-);
-
-// ─── ExamCard (Fixed with proper IST formatting) ─────────────────────────────
+// ─── ExamCard ────────────────────────────────────────────────────────────────
 const ExamCard = ({ exam, onStart, onViewResult, attempted }) => {
-  const s = statusCfg[exam.status] || statusCfg.upcoming;
   const isActive = exam.status === "active";
   const isUpcoming = exam.status === "upcoming";
   const isDone = exam.status === "completed";
   const isAttempted = attempted === true;
+  const cameraOn = exam.cameraEnabled !== false;
 
   return (
-    <div className={`bg-white rounded-2xl border-2 ${isActive ? "border-green-300 shadow-green-100" : "border-gray-100"}
-      shadow-sm hover:shadow-md transition-all overflow-hidden ${isAttempted ? "opacity-75" : ""}`}>
-      
-      <div className={`h-1 ${isActive ? "bg-green-500" : isUpcoming ? "bg-blue-500" : "bg-gray-300"}`} />
-
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-gray-900 text-base truncate">{exam.subject}</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{exam.department} Department</p>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${s.bg} ${s.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${isActive ? "animate-pulse" : ""}`} />
-              {s.label}
-            </span>
-            {isAttempted && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                <CheckCircle className="w-3 h-3" /> Attempted
-              </span>
-            )}
-          </div>
+    <article
+      className={cn(
+        "card flex flex-col p-5 transition-shadow hover:shadow-pop",
+        isActive && !isAttempted && "border-emerald-300 ring-1 ring-emerald-200"
+      )}
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-semibold text-slate-900">{exam.subject}</h3>
+          <p className="text-xs text-slate-500">{exam.department} department</p>
         </div>
+        {isAttempted ? <Badge tone="brand" icon={CheckCircle2}>Attempted</Badge> : <ExamStatusBadge status={exam.status} />}
+      </div>
 
-        <div className="flex flex-wrap gap-2 mb-4">
-          <span className="flex items-center gap-1 text-xs text-gray-500 bg-gray-50 border border-gray-100 px-2.5 py-1.5 rounded-lg">
-            <Clock className="w-3 h-3" /> {exam.duration} min
-          </span>
-          <span className="flex items-center gap-1 text-xs text-gray-500 bg-gray-50 border border-gray-100 px-2.5 py-1.5 rounded-lg">
-            <FileText className="w-3 h-3" /> {exam.questionCount} Qs
-          </span>
-          <span className="flex items-center gap-1 text-xs text-gray-500 bg-gray-50 border border-gray-100 px-2.5 py-1.5 rounded-lg">
-            <Award className="w-3 h-3" /> {exam.questionCount * (exam.marksPerQuestion || 1)} marks
-          </span>
-        </div>
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        <Badge icon={Clock}>{exam.duration} min</Badge>
+        <Badge icon={FileText}>{exam.questionCount} questions</Badge>
+        <Badge icon={Award}>{exam.questionCount * (exam.marksPerQuestion || 1)} marks</Badge>
+        <Badge icon={cameraOn ? Video : VideoOff}>{cameraOn ? "Camera proctored" : "No camera"}</Badge>
+      </div>
 
-        {/* Fixed Time Display - Consistent with Admin EditExam */}
-        <div className="mb-4 p-3 bg-gray-50 rounded-xl space-y-1.5">
-          <div className="flex justify-between text-xs">
-            <span className="text-gray-400">Starts</span>
-            <span className="font-semibold text-gray-700">
-              {formatISTDateTime(exam.startTime)}
-            </span>
+      <dl className="mb-4 space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5 text-xs">
+        <div className="flex justify-between gap-3"><dt className="text-slate-500">Opens</dt><dd className="font-medium text-slate-800">{formatDateTimeShortIST(exam.startTime)} IST</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-slate-500">Closes</dt><dd className="font-medium text-slate-800">{formatDateTimeShortIST(exam.endTime)} IST</dd></div>
+        {isUpcoming && (
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-1.5">
+            <dt className="text-slate-500">Starts in</dt><dd><CountdownBadge startTime={exam.startTime} /></dd>
           </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-gray-400">Ends</span>
-            <span className="font-semibold text-gray-700">
-              {formatISTDateTime(exam.endTime)}
-            </span>
-          </div>
-          {isUpcoming && (
-            <div className="flex justify-between text-xs pt-1 border-t border-gray-200">
-              <span className="text-gray-400">Starts in</span>
-              <CountdownBadge startTime={exam.startTime} />
-            </div>
-          )}
-        </div>
+        )}
+      </dl>
 
-        {/* CTA Buttons */}
+      <div className="mt-auto">
         {isActive && !isAttempted && (
-          <button 
-            onClick={() => onStart(exam)}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-xl shadow-md transition-colors"
-          >
-            <Play className="w-4 h-4 fill-white" /> Start Exam Now
-          </button>
+          <Button variant="success" icon={Play} size="lg" fullWidth onClick={() => onStart(exam)}>Start exam</Button>
         )}
         {isActive && isAttempted && (
-          <div className="w-full flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-500 text-sm font-bold rounded-xl">
-            <Lock className="w-4 h-4" /> Already Attempted
-          </div>
+          <Button variant="secondary" icon={Lock} fullWidth disabled>Already attempted</Button>
         )}
         {isUpcoming && (
-          <div className="w-full py-2.5 text-center text-sm text-gray-400 bg-gray-50 rounded-xl border border-gray-100 font-medium">
-            Not started yet
-          </div>
+          <p className="rounded-lg border border-dashed border-slate-300 py-2.5 text-center text-sm text-slate-500">Opens {formatWeekdayIST(exam.startTime)}</p>
         )}
         {isDone && (
-          <button 
-            onClick={() => onViewResult(exam)}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-bold rounded-xl transition-colors"
-          >
-            <BarChart3 className="w-4 h-4" /> View Result
-          </button>
+          <Button variant="subtle" icon={BarChart3} fullWidth onClick={() => onViewResult(exam)}>View result</Button>
         )}
       </div>
-    </div>
+    </article>
   );
 };
+
+const CardGrid = ({ children }) => <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -300,17 +255,18 @@ const StudentDashboard = () => {
   const [selectedExam, setSelectedExam] = useState(null);
   const [showGuidelines, setShowGuidelines] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
   const [examStarted, setExamStarted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [tab, setTab] = useState("upcoming");
 
   useEffect(() => {
     const t = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(t);
   }, []);
 
-  const loadExams = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  // Writes state only after the requests settle (safe to call from the mount effect).
+  const fetchExams = useCallback(async () => {
     try {
       const res = await API.get("/student/exams");
       const examList = res.data.exams || [];
@@ -330,6 +286,7 @@ const StudentDashboard = () => {
         })
       );
       setAttemptMap(attemptStatuses);
+      setError("");
     } catch (err) {
       setError(err.response?.data?.message || err.message);
     } finally {
@@ -337,44 +294,38 @@ const StudentDashboard = () => {
     }
   }, []);
 
-  useEffect(() => {
-    loadExams();
-  }, [loadExams]);
+  useEffect(() => { fetchExams(); }, [fetchExams]);
 
-  const isToday = (iso) => {
-    if (!iso) return false;
-    const examDate = new Date(iso);
-    const now = new Date();
-    return (
-      examDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) ===
-      now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })
-    );
-  };
+  const loadExams = useCallback(() => { setLoading(true); fetchExams(); }, [fetchExams]);
 
   const activeExams = exams.filter(e => e.status === "active");
-  const upcomingExams = exams.filter(e => e.status === "upcoming");
+  const upcomingExams = exams.filter(e => e.status === "upcoming")
+    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   const completedExams = exams.filter(e => e.status === "completed");
-  const todayExams = upcomingExams.filter(e => isToday(e.startTime));
+  const todayExams = upcomingExams.filter(e => isTodayIST(e.startTime));
+  const pendingLive = activeExams.filter(e => !attemptMap[e._id]);
 
   const handleStartExam = (exam) => {
-    if (attemptMap[exam._id]) {
-      alert("You have already attempted this exam. You cannot take it again.");
-      return;
-    }
+    if (attemptMap[exam._id]) return; // the card already shows "Already attempted"
+    setStartError("");
     setSelectedExam(exam);
     setShowGuidelines(true);
   };
 
   const beginExam = async () => {
     setStarting(true);
+    setStartError("");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach(t => t.stop());
+      // Camera permission is only checked when proctoring is on (missing field = on)
+      if (selectedExam?.cameraEnabled !== false) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(t => t.stop());
+      }
       await document.documentElement.requestFullscreen?.().catch(() => {});
       setShowGuidelines(false);
       setExamStarted(true);
     } catch {
-      alert("Please allow camera access to start the exam.");
+      setStartError("Please allow camera access to start the exam. Check the camera icon in your browser's address bar, then try again.");
     } finally {
       setStarting(false);
     }
@@ -397,208 +348,135 @@ const StudentDashboard = () => {
     return "Good evening";
   };
 
+  const summary = pendingLive.length > 0
+    ? `${pendingLive.length} exam${pendingLive.length > 1 ? "s are" : " is"} open now — you can start right away.`
+    : todayExams.length > 0
+    ? `${todayExams.length} exam${todayExams.length > 1 ? "s" : ""} scheduled for later today.`
+    : upcomingExams.length > 0
+    ? `You have ${upcomingExams.length} upcoming exam${upcomingExams.length !== 1 ? "s" : ""}.`
+    : "No exams scheduled right now.";
+
+  const listForTab = tab === "upcoming" ? upcomingExams : completedExams;
+
   return (
     <StudentLayout>
-      <div className="p-6 max-w-7xl mx-auto">
-        {/* Welcome Banner */}
-        <div className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 rounded-2xl p-6 mb-7 text-white shadow-xl">
-          <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full" />
-          <div className="absolute -bottom-10 -right-16 w-56 h-56 bg-white/5 rounded-full" />
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-blue-200 text-sm font-medium">{greet()},</p>
-              <h1 className="text-2xl font-bold mt-0.5">{studentName.split(" ")[0]} 👋</h1>
-              <p className="text-blue-100 text-sm mt-2">
-                {activeExams.length > 0
-                  ? `🔴 ${activeExams.length} exam${activeExams.length > 1 ? "s" : ""} LIVE right now`
-                  : todayExams.length > 0
-                  ? `📅 ${todayExams.length} exam${todayExams.length > 1 ? "s" : ""} scheduled for today`
-                  : `You have ${upcomingExams.length} upcoming exam${upcomingExams.length !== 1 ? "s" : ""}.`}
-              </p>
-            </div>
-            <div className="flex gap-3 shrink-0">
-              <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-center">
-                <p className="text-xs text-blue-200">Student ID</p>
-                <p className="font-mono font-bold text-lg">{studentId}</p>
-              </div>
-              <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-center">
-                <p className="text-xs text-blue-200">Current IST</p>
-                <p className="font-mono font-bold text-lg">
-                  {currentTime.toLocaleTimeString("en-IN", { 
-                    timeZone: "Asia/Kolkata", 
-                    hour: "2-digit", 
-                    minute: "2-digit", 
-                    hour12: true 
-                  })}
-                </p>
-              </div>
-            </div>
-          </div>
+      {/* Welcome */}
+      <div className="mb-6 flex flex-col gap-4 rounded-xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div>
+          <p className="text-sm font-medium text-brand-700">{greet()},</p>
+          <h1 className="text-2xl font-bold text-slate-900">{studentName.split(" ")[0]}</h1>
+          <p className="mt-1 text-sm text-slate-600">{loading ? "Loading your exams…" : summary}</p>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
-          <StatCard label="TOTAL EXAMS" value={loading ? "—" : exams.length} icon={BookOpen} color="text-gray-700" bg="bg-gray-100" />
-          <StatCard label="UPCOMING" value={loading ? "—" : upcomingExams.length} icon={Calendar} color="text-blue-600" bg="bg-blue-50" sub={todayExams.length ? `${todayExams.length} today` : undefined} />
-          <StatCard label="LIVE NOW" value={loading ? "—" : activeExams.length} icon={Zap} color="text-green-600" bg="bg-green-50" />
-          <StatCard label="COMPLETED" value={loading ? "—" : completedExams.length} icon={CheckCircle} color="text-purple-600" bg="bg-purple-50" />
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-            <p className="text-sm text-red-700">{error}</p>
-            <button onClick={loadExams} className="ml-auto text-xs text-red-600 underline font-medium">Retry</button>
+        <dl className="flex gap-3">
+          {studentId && (
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5">
+              <dt className="text-xs text-slate-500">Student ID</dt>
+              <dd className="font-mono text-lg font-bold text-slate-900">{studentId}</dd>
+            </div>
+          )}
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5">
+            <dt className="text-xs text-slate-500">Time (IST)</dt>
+            <dd className="font-mono text-lg font-bold tabular text-slate-900">
+              {currentTime.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
+            </dd>
           </div>
-        )}
-
-        {/* Live Exams */}
-        {activeExams.length > 0 && (
-          <section className="mb-7">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
-              <h2 className="text-base font-bold text-gray-800">Live Exams</h2>
-              <span className="text-xs bg-green-100 text-green-700 font-bold px-2.5 py-1 rounded-full">
-                {activeExams.length} Active
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {activeExams.map(e => (
-                <ExamCard 
-                  key={e._id} 
-                  exam={e} 
-                  onStart={handleStartExam} 
-                  onViewResult={() => navigate("/student/results")} 
-                  attempted={attemptMap[e._id]} 
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Today's Exams */}
-        {todayExams.length > 0 && (
-          <section className="mb-7">
-            <div className="flex items-center gap-3 mb-4">
-              <h2 className="text-base font-bold text-gray-800">Today's Exams</h2>
-              <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-full">
-                {todayExams.length} Scheduled
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {todayExams.map(e => (
-                <ExamCard 
-                  key={e._id} 
-                  exam={e} 
-                  onStart={handleStartExam} 
-                  onViewResult={() => navigate("/student/results")} 
-                  attempted={attemptMap[e._id]} 
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Upcoming Exams List */}
-        {upcomingExams.filter(e => !isToday(e.startTime)).length > 0 && (
-          <section className="mb-7">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-gray-800">Upcoming Exams</h2>
-              <button 
-                onClick={() => navigate("/student/exams")}
-                className="text-xs text-blue-600 hover:underline font-medium flex items-center gap-1"
-              >
-                View All <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
-              {upcomingExams.filter(e => !isToday(e.startTime)).slice(0, 5).map((exam, i, arr) => (
-                <div key={exam._id} className={`flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors ${i < arr.length - 1 ? "border-b border-gray-100" : ""}`}>
-                  <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center shrink-0">
-                    <BookOpen className="w-5 h-5 text-blue-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-800 text-sm truncate">{exam.subject}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {formatISTFull(exam.startTime)} · {exam.duration} min · {exam.questionCount} Qs
-                    </p>
-                  </div>
-                  <CountdownBadge startTime={exam.startTime} />
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Completed Exams */}
-        {completedExams.length > 0 && (
-          <section className="mb-7">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-gray-800">Recent Results</h2>
-              <button 
-                onClick={() => navigate("/student/results")}
-                className="text-xs text-blue-600 hover:underline font-medium flex items-center gap-1"
-              >
-                View All Results <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
-              {completedExams.slice(0, 4).map((exam, i, arr) => (
-                <div key={exam._id} className={`flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors ${i < arr.length - 1 ? "border-b border-gray-100" : ""}`}>
-                  <div className="w-10 h-10 bg-purple-50 border border-purple-100 rounded-xl flex items-center justify-center shrink-0">
-                    <Trophy className="w-5 h-5 text-purple-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-800 text-sm truncate">{exam.subject}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {formatISTDateTime(exam.endTime)} · {exam.questionCount} Questions
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => navigate("/student/results")}
-                    className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    Results <ChevronRight className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Empty State */}
-        {!loading && exams.length === 0 && !error && (
-          <div className="text-center py-24">
-            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-5">
-              <BookOpen className="w-9 h-9 text-gray-300" />
-            </div>
-            <p className="text-gray-600 font-semibold text-lg mb-1">No exams yet</p>
-            <p className="text-gray-400 text-sm">Your department has no scheduled exams at the moment.</p>
-          </div>
-        )}
-
-        {/* Loading Skeleton */}
-        {loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 animate-pulse">
-                <div className="h-5 bg-gray-200 rounded w-3/4 mb-3" />
-                <div className="h-3 bg-gray-200 rounded w-1/2 mb-4" />
-                <div className="h-16 bg-gray-100 rounded-xl mb-3" />
-                <div className="h-10 bg-gray-100 rounded-xl" />
-              </div>
-            ))}
-          </div>
-        )}
+        </dl>
       </div>
 
+      {/* Stats */}
+      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Open now"  value={activeExams.length}    icon={Radio}        tone="success" loading={loading} />
+        <StatCard label="Upcoming"  value={upcomingExams.length}  icon={CalendarDays} tone="info" hint={todayExams.length ? `${todayExams.length} today` : undefined} loading={loading} />
+        <StatCard label="Completed" value={completedExams.length} icon={CheckCircle2} tone="neutral" loading={loading} />
+        <StatCard label="All exams" value={exams.length}          icon={BookOpen}     loading={loading} />
+      </div>
+
+      {error && (
+        <Card className="mb-6"><ErrorState title="Couldn't load your exams" message={error} onRetry={loadExams} /></Card>
+      )}
+
+      {loading ? (
+        <CardGrid>{[1, 2, 3].map(i => <Skeleton key={i} className="h-72 rounded-xl" />)}</CardGrid>
+      ) : !error && exams.length === 0 ? (
+        <Card>
+          <EmptyState icon={BookOpen} title="No exams yet" description="Your department has no scheduled exams at the moment. Check back later." />
+        </Card>
+      ) : !error && (
+        <>
+          {/* Live exams */}
+          {activeExams.length > 0 && (
+            <section className="mb-8" aria-labelledby="live-heading">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                </span>
+                <h2 id="live-heading" className="text-base font-semibold text-slate-900">Open now</h2>
+                <Badge tone="success">{activeExams.length}</Badge>
+              </div>
+              <CardGrid>
+                {activeExams.map(e => (
+                  <ExamCard
+                    key={e._id}
+                    exam={e}
+                    onStart={handleStartExam}
+                    onViewResult={() => navigate("/student/results")}
+                    attempted={attemptMap[e._id]}
+                  />
+                ))}
+              </CardGrid>
+            </section>
+          )}
+
+          {/* Upcoming / completed */}
+          <section aria-label="Other exams">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <Tabs
+                label="Exam list"
+                value={tab}
+                onChange={setTab}
+                items={[
+                  { value: "upcoming",  label: "Upcoming",  count: upcomingExams.length },
+                  { value: "completed", label: "Completed", count: completedExams.length },
+                ]}
+              />
+              {tab === "completed" && completedExams.length > 0 && (
+                <Button variant="ghost" icon={BarChart3} onClick={() => navigate("/student/results")}>All results</Button>
+              )}
+            </div>
+
+            {listForTab.length === 0 ? (
+              <Card>
+                <EmptyState
+                  icon={tab === "upcoming" ? CalendarDays : Inbox}
+                  title={tab === "upcoming" ? "No upcoming exams" : "No completed exams yet"}
+                  description={tab === "upcoming" ? "New exams from your department will appear here." : undefined}
+                />
+              </Card>
+            ) : (
+              <CardGrid>
+                {listForTab.map(e => (
+                  <ExamCard
+                    key={e._id}
+                    exam={e}
+                    onStart={handleStartExam}
+                    onViewResult={() => navigate("/student/results")}
+                    attempted={attemptMap[e._id]}
+                  />
+                ))}
+              </CardGrid>
+            )}
+          </section>
+        </>
+      )}
+
       {showGuidelines && selectedExam && (
-        <GuidelinesModal 
-          exam={selectedExam} 
+        <GuidelinesModal
+          exam={selectedExam}
           onStart={beginExam}
           onClose={() => { setShowGuidelines(false); setSelectedExam(null); }}
-          starting={starting} 
+          starting={starting}
+          error={startError}
         />
       )}
     </StudentLayout>

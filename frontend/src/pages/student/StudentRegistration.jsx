@@ -1,10 +1,26 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { Check, Circle, CheckCircle2, QrCode, User, Mail, Phone, School, Hash, Lock, ArrowRight, XCircle } from "lucide-react";
 
 import {
   getRegistrationQR,
   registerStudentFromQR,
 } from "../../services/api";
+import { Alert, Button, Field, Input, PasswordInput, LoadingState } from "../../components/ui";
+import { cn } from "../../utils/cn";
+
+// Centered single-card frame for this public page
+const Frame = ({ children }) => (
+  <div className="flex min-h-screen flex-col items-center bg-canvas px-4 py-10 sm:justify-center">
+    <div className="mb-6 flex items-center gap-3">
+      <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <img src="/logo.jpg" alt="" className="h-full w-full object-contain p-1" />
+      </span>
+      <span className="text-base font-bold text-slate-900">SS Exam Portal</span>
+    </div>
+    <div className="card w-full max-w-lg p-6 sm:p-8">{children}</div>
+  </div>
+);
 
 const StudentRegistration = () => {
   const { token } = useParams();
@@ -123,11 +139,7 @@ const StudentRegistration = () => {
   // ==========================================
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p>Loading...</p>
-      </div>
-    );
+    return <Frame><LoadingState label="Checking your registration link…" /></Frame>;
   }
 
   // ==========================================
@@ -136,21 +148,17 @@ const StudentRegistration = () => {
 
   if (!validQR) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-
-        <div className="w-full max-w-md rounded-xl bg-white p-8 text-center shadow">
-
-          <h1 className="text-xl font-bold text-red-600">
-            Invalid QR Code
-          </h1>
-
-          <p className="mt-3 text-gray-500">
-            This registration QR is invalid or expired.
+      <Frame>
+        <div className="text-center">
+          <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+            <XCircle className="h-6 w-6" />
+          </span>
+          <h1 className="text-xl font-bold text-slate-900">This QR code isn't valid</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            {error || "This registration QR is invalid or expired."} Ask your department admin for a new code.
           </p>
-
         </div>
-
-      </div>
+      </Frame>
     );
   }
 
@@ -160,37 +168,25 @@ const StudentRegistration = () => {
 
   if (success) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+      <Frame>
+        <div className="text-center">
+          <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+            <CheckCircle2 className="h-6 w-6" />
+          </span>
+          <h1 className="text-xl font-bold text-slate-900">You're registered</h1>
+          <p className="mt-1 text-sm text-slate-500">Keep your student ID — you'll need it at the exam.</p>
 
-        <div className="w-full max-w-md rounded-xl bg-white p-8 text-center shadow">
-
-          <div className="mb-4 text-5xl">
-            ✅
+          <div className="mx-auto mt-6 max-w-xs rounded-xl border border-brand-200 bg-brand-50 p-4">
+            <p className="text-xs font-medium text-brand-700">Your student ID</p>
+            <p className="mt-1 font-mono text-3xl font-bold text-slate-900">{success.studentId}</p>
           </div>
 
-          <h1 className="text-2xl font-bold text-green-600">
-            Registration Successful
-          </h1>
+          <p className="mt-5 font-semibold text-slate-900">{success.name}</p>
+          <p className="text-sm text-slate-500">{success.email}</p>
 
-          <p className="mt-4 text-gray-500">
-            Your Student ID is:
-          </p>
-
-          <div className="mt-2 rounded-lg bg-gray-100 p-4 text-2xl font-bold">
-            {success.studentId}
-          </div>
-
-          <p className="mt-4 text-gray-600">
-            {success.name}
-          </p>
-
-          <p className="mt-1 text-sm text-gray-500">
-            {success.email}
-          </p>
-
+          <Link to="/" className="btn btn-md btn-primary mt-6">Go to sign in <ArrowRight className="h-4 w-4" /></Link>
         </div>
-
-      </div>
+      </Frame>
     );
   }
 
@@ -198,215 +194,83 @@ const StudentRegistration = () => {
   // FORM
   // ==========================================
 
+  const checks = [
+    [passwordChecks.length, "At least 8 characters"],
+    [passwordChecks.uppercase, "One uppercase letter (A–Z)"],
+    [passwordChecks.lowercase, "One lowercase letter (a–z)"],
+    [passwordChecks.number, "One number (0–9)"],
+    [passwordChecks.special, "One special character (!@#$%)"],
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50 p-5">
-
-      <div className="mx-auto max-w-lg">
-
-        <div className="rounded-xl bg-white p-6 shadow">
-
-          <h1 className="text-2xl font-bold text-gray-800">
-            Student Registration
-          </h1>
-
-          <p className="mt-1 text-sm text-gray-500">
-            Fill your details to create your student account
-          </p>
-
-
-          <form
-            onSubmit={handleSubmit}
-            className="mt-6 space-y-4"
-          >
-
-           <input
-              type="text"
-              name="fullName"
-              placeholder="Full Name"
-              value={form.fullName}
-              onChange={handleChange}
-              required
-              className="w-full rounded-lg border p-3"
-            />
-
-
-            <input
-              type="email"
-              name="email"
-              placeholder="Email"
-              value={form.email}
-              onChange={handleChange}
-              required
-              className="w-full rounded-lg border p-3"
-            />
-
-
-            <input
-              type="tel"
-              name="mobile"
-              placeholder="Mobile Number"
-              value={form.mobile}
-              onChange={handleChange}
-              required
-              className="w-full rounded-lg border p-3"
-            />
-
-
-            <input
-              type="text"
-              name="college"
-              placeholder="College Name"
-              value={form.college}
-              onChange={handleChange}
-              className="w-full rounded-lg border p-3"
-            />
-
-            {/* ==========================================
-                  PASSWORD
-              ========================================== */}
-
-              <div>
-                <input
-                  type="password"
-                  name="password"
-                  placeholder="Password"
-                  value={form.password}
-                  onChange={handleChange}
-                  required
-                  className="w-full rounded-lg border p-3"
-                />
-
-                {/* Password Checklist */}
-
-                {form.password.length > 0 && (
-                  <div className="mt-3 rounded-lg bg-gray-50 p-4">
-
-                    <p className="mb-3 text-sm font-semibold text-gray-700">
-                      Password must contain:
-                    </p>
-
-                    <div className="space-y-2 text-sm">
-
-                      <div
-                        className={
-                          passwordChecks.length
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }
-                      >
-                        {passwordChecks.length ? "✓" : "○"} At least 8 characters
-                      </div>
-
-                      <div
-                        className={
-                          passwordChecks.uppercase
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }
-                      >
-                        {passwordChecks.uppercase ? "✓" : "○"} One uppercase letter (A-Z)
-                      </div>
-
-                      <div
-                        className={
-                          passwordChecks.lowercase
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }
-                      >
-                        {passwordChecks.lowercase ? "✓" : "○"} One lowercase letter (a-z)
-                      </div>
-
-                      <div
-                        className={
-                          passwordChecks.number
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }
-                      >
-                        {passwordChecks.number ? "✓" : "○"} One number (0-9)
-                      </div>
-
-                      <div
-                        className={
-                          passwordChecks.special
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }
-                      >
-                        {passwordChecks.special ? "✓" : "○"} One special character (!@#$%)
-                      </div>
-
-                    </div>
-
-                  </div>
-                )}
-              </div>
-
-              {/* ==========================================
-                    CONFIRM PASSWORD
-                ========================================== */}
-
-                <div>
-
-                  <input
-                    type="password"
-                    name="confirmPassword"
-                    placeholder="Confirm Password"
-                    value={form.confirmPassword}
-                    onChange={handleChange}
-                    required
-                    className={`w-full rounded-lg border p-3 ${
-                      form.confirmPassword.length > 0
-                        ? passwordsMatch
-                          ? "border-green-500"
-                          : "border-red-500"
-                        : "border-gray-300"
-                    }`}
-                  />
-
-                  {form.confirmPassword.length > 0 && (
-                    <p
-                      className={`mt-2 text-sm ${
-                        passwordsMatch
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {passwordsMatch
-                        ? "✓ Passwords match"
-                        : "✗ Passwords do not match"}
-                    </p>
-                  )}
-
-                </div>
-
-            {error && (
-              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
-                {error}
-              </div>
-            )}
-              <button
-                type="submit"
-                disabled={
-                  submitting ||
-                  !isStrongPassword ||
-                  !passwordsMatch
-                }
-                className="w-full rounded-lg bg-blue-600 p-3 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-              {submitting
-                ? "Creating Student..."
-                : "Register"}
-            </button>
-
-          </form>
-
+    <Frame>
+      <div className="mb-6 flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+          <QrCode className="h-5 w-5" />
+        </span>
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Student registration</h1>
+          <p className="text-sm text-slate-500">Fill in your details to create your student account.</p>
         </div>
-
       </div>
 
-    </div>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Full name" required>
+          {(p) => <Input {...p} icon={User} type="text" name="fullName" value={form.fullName} onChange={handleChange} required autoComplete="name" placeholder="As on your college ID" />}
+        </Field>
+        <Field label="Email" required>
+          {(p) => <Input {...p} icon={Mail} type="email" name="email" value={form.email} onChange={handleChange} required autoComplete="email" placeholder="you@example.com" />}
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Mobile number" required>
+            {(p) => <Input {...p} icon={Phone} type="tel" name="mobile" value={form.mobile} onChange={handleChange} required autoComplete="tel" placeholder="10-digit number" />}
+          </Field>
+          <Field label="Roll number">
+            {(p) => <Input {...p} icon={Hash} type="text" name="rollNumber" value={form.rollNumber} onChange={handleChange} placeholder="Optional" />}
+          </Field>
+        </div>
+        <Field label="College">
+          {(p) => <Input {...p} icon={School} type="text" name="college" value={form.college} onChange={handleChange} placeholder="College name" />}
+        </Field>
+
+        <Field label="Password" required>
+          {(p) => <PasswordInput {...p} icon={Lock} name="password" value={form.password} onChange={handleChange} required autoComplete="new-password" placeholder="Create a strong password" />}
+        </Field>
+
+        {form.password.length > 0 && (
+          <ul className="grid grid-cols-1 gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2" aria-label="Password requirements">
+            {checks.map(([ok, text]) => (
+              <li key={text} className={cn("flex items-center gap-1.5", ok ? "text-emerald-700" : "text-slate-500")}>
+                {ok ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Circle className="h-3 w-3" aria-hidden="true" />}
+                {text}
+                <span className="sr-only">{ok ? "(met)" : "(not met)"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <Field
+          label="Confirm password"
+          required
+          error={form.confirmPassword.length > 0 && !passwordsMatch ? "Passwords do not match" : undefined}
+          hint={form.confirmPassword.length > 0 && passwordsMatch ? "Passwords match" : undefined}
+        >
+          {(p) => <PasswordInput {...p} icon={Lock} name="confirmPassword" value={form.confirmPassword} onChange={handleChange} required autoComplete="new-password" placeholder="Re-enter your password" />}
+        </Field>
+
+        {error && <Alert tone="danger">{error}</Alert>}
+
+        <Button
+          type="submit"
+          size="lg"
+          fullWidth
+          loading={submitting}
+          disabled={!isStrongPassword || !passwordsMatch}
+        >
+          {submitting ? "Creating account…" : "Register"}
+        </Button>
+      </form>
+    </Frame>
   );
 };
 

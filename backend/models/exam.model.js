@@ -46,6 +46,12 @@ const examSchema = new mongoose.Schema({
     default:  1,
   },
 
+  // ── Camera proctoring — missing on old exams, treated as true ─────────────
+  cameraEnabled: {
+    type:    Boolean,
+    default: true,
+  },
+
   questions: {
     type:    [questionSchema],
     default: [],

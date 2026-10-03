@@ -48,6 +48,7 @@ const shapeExam = (exam) => ({
   questionCount:    exam.questions?.length ?? 0,
   marksPerQuestion: exam.marksPerQuestion ?? 1,
   totalMarks:       (exam.questions?.length ?? 0) * (exam.marksPerQuestion ?? 1),
+  cameraEnabled:    exam.cameraEnabled ?? true,
   createdAt:        exam.createdAt,
   createdBy:        exam.createdBy,
 });
@@ -102,6 +103,7 @@ export const createExam = [
   body('startTime').notEmpty().isISO8601().withMessage('Valid start time is required'),
   body('endTime').notEmpty().isISO8601().withMessage('Valid end time is required'),
   body('marksPerQuestion').isInt({ min: 1, max: 10 }).withMessage('Marks per question must be between 1 and 10'),
+  body('cameraEnabled').optional().isBoolean().withMessage('cameraEnabled must be true or false').toBoolean(true),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('questions.*.text').if(body('questions').exists()).trim().notEmpty().withMessage('Each question must have text'),
   body('questions.*.options').if(body('questions').exists()).isArray({ min: 4, max: 4 }).withMessage('Each question must have exactly 4 options'),
@@ -113,7 +115,7 @@ export const createExam = [
       const adminDept = await getAdminDept(req, res);
       if (!adminDept) return;
 
-      const { subject, duration, startTime, endTime, marksPerQuestion, questions = [] } = req.body;
+      const { subject, duration, startTime, endTime, marksPerQuestion, cameraEnabled, questions = [] } = req.body;
 
       if (new Date(endTime) <= new Date(startTime))
         return res.status(400).json({ message: 'End time must be after start time' });
@@ -138,6 +140,7 @@ export const createExam = [
         department:       adminDept,
         createdBy:        req.user._id || req.user.id,
         marksPerQuestion: Number(marksPerQuestion),
+        cameraEnabled:    typeof cameraEnabled === 'boolean' ? cameraEnabled : true,
         questions:        questions.map(q => ({
           text:          q.text.trim(),
           options:       q.options.map(o => String(o).trim()),
@@ -168,6 +171,7 @@ export const updateExam = [
   body('duration').optional().isInt({ min: 1 }).withMessage('Duration must be positive'),
   body('startTime').optional().isISO8601().withMessage('Invalid start time'),
   body('endTime').optional().isISO8601().withMessage('Invalid end time'),
+  body('cameraEnabled').optional().isBoolean().withMessage('cameraEnabled must be true or false').toBoolean(true),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
 
   async (req, res) => {
@@ -179,12 +183,14 @@ export const updateExam = [
       const exam = await Exam.findOne({ _id: req.params.id, department: adminDept });
       if (!exam) return res.status(404).json({ message: 'Exam not found or not in your department' });
 
-      const { subject, duration, startTime, endTime, questions } = req.body;
+      const { subject, duration, startTime, endTime, cameraEnabled, questions } = req.body;
 
       if (subject)   exam.subject   = subject.trim();
       if (duration)  exam.duration  = Number(duration);
       if (startTime) exam.startTime = new Date(startTime);
       if (endTime)   exam.endTime   = new Date(endTime);
+      // explicit type check — `if (cameraEnabled)` would silently drop `false`
+      if (typeof cameraEnabled === 'boolean') exam.cameraEnabled = cameraEnabled;
 
       if (exam.endTime <= exam.startTime)
         return res.status(400).json({ message: 'End time must be after start time' });
@@ -463,6 +469,7 @@ export const getStudentExamById = async (req, res) => {
         endTime:          exam.endTime,
         marksPerQuestion: exam.marksPerQuestion,
         totalMarks:       exam.questions.length * exam.marksPerQuestion,
+        cameraEnabled:    exam.cameraEnabled ?? true,
         questions:        exam.questions.map(q => ({
           _id:     q._id,
           text:    q.text,

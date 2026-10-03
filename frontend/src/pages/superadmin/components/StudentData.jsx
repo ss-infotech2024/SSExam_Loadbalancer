@@ -1,57 +1,20 @@
-// pages/admin/StudentData.jsx
-import React, { useState, useEffect } from "react";
-import API from "@/services/api";
+// pages/superadmin/components/StudentData.jsx — student counts per department
+import React, { useState } from "react";
+import { Building2, ChevronRight, ClipboardList, FileCheck2, GraduationCap, RefreshCw, Users } from "lucide-react";
 import {
-  Search, Download, Eye, Mail, Phone, GraduationCap, Calendar,
-  TrendingUp, TrendingDown, X, UserCheck, UserX, BarChart2, Users
-} from "lucide-react";
+  PageHeader, Button, SearchInput, Select, StatCard, Card, EmptyState, ErrorState, Skeleton, Alert, Spinner,
+} from "../../../components/ui";
+import DepartmentDetailModal from "../../../components/superadmin/DepartmentDetailModal";
+import { useDepartmentStats, useDepartmentDetail } from "../useDepartmentStats";
 
 const StudentData = () => {
-  const [departments, setDepartments] = useState([]);
-  const [selectedDepartment, setSelectedDepartment] = useState(null);
-  const [departmentDetails, setDepartmentDetails] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const { departments, loading, error, reload } = useDepartmentStats();
+  const { detail, loadingDept, detailError, open, close, clearError } = useDepartmentDetail();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("studentCount");
 
-  // Fetch department-wise stats
-  const fetchDepartmentStats = async () => {
-    setLoading(true);
-    try {
-      const res = await API.get("/superadmin/department-stats");
-      setDepartments(res.data.departments || []);
-    } catch (err) {
-      console.error("Error fetching department stats:", err);
-      alert("Failed to load department data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch detailed results for a specific department
-  const fetchDepartmentDetails = async (deptName) => {
-    setDetailLoading(true);
-    try {
-      const res = await API.get(`/superadmin/department/${deptName}/results`);
-      setDepartmentDetails(res.data);
-      setSelectedDepartment(deptName);
-    } catch (err) {
-      console.error("Error fetching department details:", err);
-      alert("Failed to load department details");
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDepartmentStats();
-  }, []);
-
   const filteredDepartments = departments
-    .filter(dept => 
-      dept.department.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    .filter((dept) => dept.department.toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((a, b) => {
       if (sortBy === "studentCount") return b.studentCount - a.studentCount;
       if (sortBy === "averageScore") return b.averageScore - a.averageScore;
@@ -59,185 +22,91 @@ const StudentData = () => {
       return 0;
     });
 
-  const StudentDetailModal = ({ deptData, onClose }) => {
-    if (!deptData) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
-          {/* Header */}
-          <div className="p-6 border-b flex justify-between items-center bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-            <div>
-              <h2 className="text-2xl font-bold">{deptData.department} Department</h2>
-              <p className="text-blue-100">Student Performance Overview</p>
-            </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <div className="p-6 overflow-y-auto flex-1">
-            {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              <div className="bg-white p-5 rounded-xl border">
-                <p className="text-sm text-gray-500">Total Students</p>
-                <p className="text-3xl font-bold text-blue-600">{deptData.totalStudents}</p>
-              </div>
-              <div className="bg-white p-5 rounded-xl border">
-                <p className="text-sm text-gray-500">Total Exams</p>
-                <p className="text-3xl font-bold">{deptData.totalExams}</p>
-              </div>
-              <div className="bg-white p-5 rounded-xl border">
-                <p className="text-sm text-gray-500">Total Attempts</p>
-                <p className="text-3xl font-bold text-green-600">{deptData.totalAttempts}</p>
-              </div>
-              <div className="bg-white p-5 rounded-xl border">
-                <p className="text-sm text-gray-500">Average Score</p>
-                <p className="text-3xl font-bold text-amber-600">{deptData.averageScore || 0}%</p>
-              </div>
-            </div>
-
-            {/* Results Table */}
-            <h3 className="text-lg font-semibold mb-4">Student Exam Results</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Student Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Roll No.</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Exam</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Score</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Percentage</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Grade</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Submitted</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {deptData.results?.map((result, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="px-4 py-4 font-medium">{result.student.fullName}</td>
-                      <td className="px-4 py-4 font-mono text-sm">{result.student.rollNumber}</td>
-                      <td className="px-4 py-4">{result.exam.subject}</td>
-                      <td className="px-4 py-4 font-semibold">
-                        {result.score} / {result.totalMarks}
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className={`font-bold ${result.percentage >= 70 ? 'text-green-600' : result.percentage >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
-                          {result.percentage}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 font-bold">{result.grade}</td>
-                      <td className="px-4 py-4 text-sm text-gray-500">
-                        {new Date(result.submittedAt).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const totalStudents = departments.reduce((s, d) => s + (d.studentCount || 0), 0);
+  const maxStudents = Math.max(1, ...departments.map((d) => d.studentCount || 0));
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-800">Department-wise Student Data</h1>
-          <p className="text-gray-500 mt-1">Overview of all departments and student performance</p>
-        </div>
-        <button 
-          onClick={fetchDepartmentStats}
-          className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50"
-        >
-          <BarChart2 className="w-4 h-4" />
-          Refresh Data
-        </button>
+    <>
+      <PageHeader
+        title="Students"
+        description="Student enrolment by department. Select a department to see its exam results."
+        actions={<Button variant="secondary" icon={RefreshCw} onClick={reload} loading={loading}>Refresh</Button>}
+      />
+
+      <div className="mb-6 grid grid-cols-3 gap-3 sm:gap-4">
+        <StatCard label="Total students" value={totalStudents}      icon={GraduationCap} loading={loading} />
+        <StatCard label="Departments"    value={departments.length} icon={Building2} tone="info" loading={loading} />
+        <StatCard
+          label="Largest department"
+          value={departments.length ? [...departments].sort((a, b) => b.studentCount - a.studentCount)[0].department : "—"}
+          icon={Users}
+          tone="neutral"
+          loading={loading}
+        />
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-4 bg-white p-4 rounded-xl shadow-sm">
-        <div className="flex-1 flex items-center border rounded-lg px-4 py-2.5">
-          <Search className="w-5 h-5 text-gray-400 mr-3" />
-          <input 
-            type="text" 
-            placeholder="Search by department name..." 
-            className="flex-1 outline-none text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
+      {detailError && (
+        <Alert tone="danger" className="mb-4" action={<button className="text-xs font-semibold underline" onClick={clearError}>Dismiss</button>}>
+          {detailError}
+        </Alert>
+      )}
 
-        <select 
-          className="border rounded-lg px-4 py-2.5 text-sm"
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-        >
-          <option value="studentCount">Sort by Student Count</option>
-          <option value="averageScore">Sort by Average Score</option>
-          <option value="passRate">Sort by Pass Rate</option>
-        </select>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+        <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search departments" className="flex-1" />
+        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort departments" className="sm:w-56">
+          <option value="studentCount">Sort by student count</option>
+          <option value="averageScore">Sort by average score</option>
+          <option value="passRate">Sort by pass rate</option>
+        </Select>
       </div>
 
-      {/* Departments Grid */}
-      {loading ? (
-        <div className="text-center py-20">
-          <div className="animate-spin h-10 w-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading departments...</p>
+      {error ? (
+        <Card><ErrorState message={error} onRetry={reload} /></Card>
+      ) : loading ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
         </div>
+      ) : filteredDepartments.length === 0 ? (
+        <Card><EmptyState icon={Building2} title="No departments found" description="Try a different search." /></Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredDepartments.map((dept) => (
-            <div 
+            <button
               key={dept.department}
-              onClick={() => fetchDepartmentDetails(dept.department)}
-              className="bg-white rounded-2xl p-6 shadow-sm border hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group"
+              type="button"
+              onClick={() => open(dept.department)}
+              disabled={!!loadingDept}
+              className="card group p-5 text-left transition-shadow hover:border-brand-300 hover:shadow-pop disabled:cursor-wait"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xl font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">
-                    {dept.department}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1">Department</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-500">Department</p>
+                  <h3 className="truncate text-lg font-semibold text-slate-900">{dept.department}</h3>
                 </div>
-                <div className="text-right">
-                  <div className="text-3xl font-bold text-blue-600">{dept.studentCount}</div>
-                  <p className="text-xs text-gray-500">Students</p>
-                </div>
+                {loadingDept === dept.department
+                  ? <Spinner />
+                  : <ChevronRight className="h-5 w-5 text-slate-300 transition-colors group-hover:text-brand-600" aria-hidden="true" />}
               </div>
 
-              {/* <div className="mt-6 grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-lg font-semibold">{dept.totalExams}</p>
-                  <p className="text-xs text-gray-500">Exams</p>
-                </div>
-                <div>
-                  <p className="text-lg font-semibold text-green-600">{dept.averageScore}%</p>
-                  <p className="text-xs text-gray-500">Avg Score</p>
-                </div>
-                <div>
-                  <p className="text-lg font-semibold text-emerald-600">{dept.passRate}%</p>
-                  <p className="text-xs text-gray-500">Pass Rate</p>
-                </div>
-              </div> */}
-            </div>
+              <p className="mt-4 text-3xl font-bold tabular text-slate-900">
+                {dept.studentCount}
+                <span className="ml-1.5 text-sm font-medium text-slate-500">students</span>
+              </p>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                <div className="h-full rounded-full bg-brand-500" style={{ width: `${((dept.studentCount || 0) / maxStudents) * 100}%` }} />
+              </div>
+
+              <div className="mt-4 flex gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                <span className="flex items-center gap-1.5"><ClipboardList className="h-3.5 w-3.5" /> {dept.totalExams ?? 0} exams</span>
+                <span className="flex items-center gap-1.5"><FileCheck2 className="h-3.5 w-3.5" /> {dept.totalAttempts ?? 0} attempts</span>
+              </div>
+            </button>
           ))}
         </div>
       )}
 
-      {/* Student Detail Modal */}
-      {selectedDepartment && departmentDetails && (
-        <StudentDetailModal 
-          deptData={departmentDetails} 
-          onClose={() => {
-            setSelectedDepartment(null);
-            setDepartmentDetails(null);
-          }} 
-        />
-      )}
-    </div>
+      {detail && <DepartmentDetailModal data={detail} onClose={close} />}
+    </>
   );
 };
 

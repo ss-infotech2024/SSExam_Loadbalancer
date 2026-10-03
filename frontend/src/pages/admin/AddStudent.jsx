@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import API from "@/services/api";
 import {
-  FiUser, FiLock, FiBookOpen, FiPlusCircle,
-  FiCheckCircle, FiMail, FiEye, FiEyeOff, FiUsers,
-  FiTrendingUp, FiClock, FiAlertCircle, FiUpload,
-  FiX, FiRefreshCw, FiHash, FiDownload, FiShield,
-} from "react-icons/fi";
+  User, Lock, Mail, Hash, UserPlus, Users, UserCheck, CalendarPlus, UploadCloud, FileSpreadsheet,
+  X, Download, ShieldCheck, ArrowRight, Building2, CheckCircle2, Inbox,
+} from "lucide-react";
 import * as XLSX from "xlsx";
+import {
+  PageHeader, Button, Card, CardHeader, Field, Input, PasswordInput, Tabs, StatCard, Alert, Badge, Avatar,
+  EmptyState, Skeleton, useToast,
+} from "../../components/ui";
+import { cn } from "../../utils/cn";
 
 // Turn axios errors into Error(message) so callers can show err.message
 const toError = (err) => {
@@ -43,7 +46,7 @@ const api = {
       .catch(toError);
   },
 
-  // ✅ NEW: Download all students with passwords from backend
+  // Download all students with passwords from backend
   downloadAllStudents: (department) =>
     API
       .get("/admin/students/download-all", {
@@ -57,38 +60,7 @@ const api = {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const DEPARTMENTS = ["Data Bricks", "Service Now"];
 
-const DEPT_LABELS = {
-  DB: "Data Bricks",
-  SN: "Service Now",
-};
-
 const EMPTY_FORM = { fullName: "", email: "", password: "", studentId: "" };
-
-// ─── DEPARTMENT STYLE MAP ─────────────────────────────────────────────────────
-const getDeptStyle = (dept = "") => {
-  const map = {
-    DB: { icon: "🌐", lightBg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700", bg: "bg-purple-600", hoverBg: "hover:bg-purple-700", ring: "ring-purple-500" },
-    SN: { icon: "💻", lightBg: "bg-blue-50",   border: "border-blue-200",   text: "text-blue-700",   bg: "bg-blue-600",   hoverBg: "hover:bg-blue-700",   ring: "ring-blue-500"   },
-  };
-  return map[dept] || {
-    icon: "📚", lightBg: "bg-gray-50", border: "border-gray-200",
-    text: "text-gray-700", bg: "bg-gray-600", hoverBg: "hover:bg-gray-700", ring: "ring-gray-500",
-  };
-};
-
-// ─── TOAST ────────────────────────────────────────────────────────────────────
-const Toast = ({ message, type, onClose }) => (
-  <div className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-sm font-semibold
-    ${type === "success" ? "bg-emerald-600 text-white" : "bg-red-500 text-white"}`}>
-    {type === "success"
-      ? <FiCheckCircle className="w-4 h-4 shrink-0" />
-      : <FiAlertCircle className="w-4 h-4 shrink-0" />}
-    <span>{message}</span>
-    <button onClick={onClose} className="ml-1 opacity-70 hover:opacity-100">
-      <FiX className="w-4 h-4" />
-    </button>
-  </div>
-);
 
 // ─── DOWNLOAD HELPER ──────────────────────────────────────────────────────────
 const downloadBlob = (blob, filename) => {
@@ -107,29 +79,25 @@ const downloadBlob = (blob, filename) => {
 // ═════════════════════════════════════════════════════════════════════════════
 const AddStudent = () => {
   const navigate = useNavigate();
+  const showToast = useToast();
+  const fileInputRef = useRef(null);
 
   const [adminDepartment, setAdminDepartment] = useState("");
   const [students,        setStudents]        = useState([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
 
+  const [mode,         setMode]         = useState("single");
   const [formData,     setFormData]     = useState(EMPTY_FORM);
   const [errors,       setErrors]       = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
 
   const [excelFile,    setExcelFile]    = useState(null);
   const [excelPreview, setExcelPreview] = useState([]);
   const [bulkErrors,   setBulkErrors]   = useState([]);
   const [bulkLoading,  setBulkLoading]  = useState(false);
+  const [dragOver,     setDragOver]     = useState(false);
 
   const [downloadingAll, setDownloadingAll] = useState(false);
-
-  const [toast, setToast] = useState(null);
-
-  const showToast = useCallback((message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4500);
-  }, []);
 
   // ── Auth guard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -167,8 +135,6 @@ const AddStudent = () => {
   const thisMonthCount = deptStudents.filter((s) =>
     (s.joinDate || s.createdAt || "").startsWith(currentMonth)
   ).length;
-
-  const deptStyle = getDeptStyle(adminDepartment);
 
   // ── Single form ────────────────────────────────────────────────────────────
   const handleChange = (e) => {
@@ -212,7 +178,7 @@ const AddStudent = () => {
       setStudents((p) => [created, ...p]);
       setFormData(EMPTY_FORM);
       const assignedId = created.studentId ?? created._id?.toString().slice(-4);
-      showToast(`Student added! Assigned ID: ${assignedId ?? "assigned"}`);
+      showToast(`Student added. Assigned ID: ${assignedId ?? "assigned"}`);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -221,8 +187,7 @@ const AddStudent = () => {
   };
 
   // ── Excel preview ──────────────────────────────────────────────────────────
-  const handleExcelFileChange = async (e) => {
-    const file = e.target.files[0];
+  const handleExcelFile = async (file) => {
     if (!file) return;
 
     setExcelFile(file);
@@ -297,9 +262,16 @@ const AddStudent = () => {
 
       setExcelPreview(parsed);
       setBulkErrors(tempErrors);
-    } catch (err) {
+    } catch {
       setBulkErrors(["Could not read file. Make sure it's a valid .xlsx file."]);
     }
+  };
+
+  const clearExcel = () => {
+    setExcelFile(null);
+    setExcelPreview([]);
+    setBulkErrors([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   // ── Bulk upload ────────────────────────────────────────────────────────────
@@ -308,14 +280,6 @@ const AddStudent = () => {
     setBulkLoading(true);
     try {
       const response = await api.bulkAddStudents(excelFile);
-
-      const errorsHeader = response.headers["x-errors"] || "[]";
-      let parsedErrors = [];
-      try {
-        parsedErrors = JSON.parse(errorsHeader);
-      } catch {
-        parsedErrors = [];
-      }
 
       const insertedCount = parseInt(response.headers["x-inserted-count"] || "0", 10);
       const failedCount   = parseInt(response.headers["x-failed-count"]   || "0", 10);
@@ -328,9 +292,9 @@ const AddStudent = () => {
       downloadBlob(blob, filename);
 
       if (insertedCount > 0 && failedCount > 0) {
-        showToast(`Added ${insertedCount} student(s). ${failedCount} skipped (duplicates). Credentials Excel downloaded!`);
+        showToast(`Added ${insertedCount} student(s). ${failedCount} skipped (duplicates). Credentials Excel downloaded.`);
       } else if (insertedCount > 0) {
-        showToast(`Successfully added ${insertedCount} student(s)! Credentials Excel downloaded!`);
+        showToast(`Added ${insertedCount} student(s). Credentials Excel downloaded.`);
       } else {
         showToast("No new students added — all records already exist.", "error");
       }
@@ -344,7 +308,7 @@ const AddStudent = () => {
     }
   };
 
-  // ✅ UPDATED: Download all students — now calls backend to include passwords
+  // Download all students — backend includes passwords
   const downloadAllStudents = async () => {
     if (!deptStudents.length) return;
     setDownloadingAll(true);
@@ -365,7 +329,7 @@ const AddStudent = () => {
       downloadBlob(blob, filename);
 
       const totalCount = response.headers["x-total-count"] || deptStudents.length;
-      showToast(`Downloaded ${totalCount} student records with passwords!`);
+      showToast(`Downloaded ${totalCount} student records with passwords.`);
     } catch (err) {
       showToast(err.message || "Failed to download Excel file.", "error");
     } finally {
@@ -373,454 +337,226 @@ const AddStudent = () => {
     }
   };
 
-  const clearExcel = () => {
-    setExcelFile(null);
-    setExcelPreview([]);
-    setBulkErrors([]);
-  };
-
   // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    <>
+      <PageHeader
+        title="Add students"
+        description="Register students one at a time or in bulk from Excel. Student IDs are assigned automatically from 101."
+        eyebrow={adminDepartment && <Badge tone="brand" icon={Building2}>{adminDepartment} department</Badge>}
+        actions={<Button variant="secondary" iconRight={ArrowRight} onClick={() => navigate("/admin/view-students")}>All students</Button>}
+      />
 
-      <div className="max-w-7xl mx-auto">
+      <div className="mb-6 grid grid-cols-3 gap-3 sm:gap-4">
+        <StatCard label="Total students"  value={deptStudents.length} icon={Users}        loading={loadingStudents} />
+        <StatCard label="Active"          value={activeCount}         icon={UserCheck}    tone="success" loading={loadingStudents} />
+        <StatCard label="Added this month" value={thisMonthCount}     icon={CalendarPlus} tone="info" loading={loadingStudents} />
+      </div>
 
-        {/* ── HEADER ── */}
-        <div className="mb-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Add New Student</h1>
-              <p className="text-gray-600 mt-1 flex items-center gap-2 text-sm">
-                <FiUsers className="w-4 h-4" /> Manage students for your department
-              </p>
-            </div>
-            <div className={`px-5 py-3 ${deptStyle.lightBg} rounded-xl border ${deptStyle.border} flex items-center gap-3`}>
-              <span className="text-2xl">{deptStyle.icon}</span>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Your Department</p>
-                <p className={`text-sm font-black ${deptStyle.text}`}>
-                  {adminDepartment} — {DEPT_LABELS[adminDepartment] || ""}
-                </p>
-              </div>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+        <div className="space-y-4 xl:col-span-3">
+          <Tabs
+            label="How to add students"
+            value={mode}
+            onChange={setMode}
+            items={[
+              { value: "single", label: "Single student", icon: UserPlus },
+              { value: "bulk",   label: "Bulk upload",    icon: UploadCloud },
+            ]}
+          />
 
-          {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-            {[
-              { icon: FiUsers,      label: "Total Students", value: deptStudents.length, bg: deptStyle.lightBg, color: deptStyle.text },
-              { icon: FiTrendingUp, label: "Active",         value: activeCount,         bg: "bg-green-100",    color: "text-green-600" },
-              { icon: FiClock,      label: "This Month",     value: thisMonthCount,      bg: "bg-blue-100",     color: "text-blue-600"  },
-            ].map(({ icon: Icon, label, value, bg, color }) => (
-              <div key={label} className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg ${bg} flex items-center justify-center shrink-0`}>
-                  <Icon className={`w-5 h-5 ${color}`} />
+          {/* ── SINGLE STUDENT FORM ── */}
+          {mode === "single" && (
+            <Card>
+              <CardHeader title="New student" description="The student signs in with this email and password." icon={UserPlus} />
+              <form onSubmit={handleSubmit} className="card-body space-y-5" noValidate>
+                <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                  <Field label="Full name" required error={errors.fullName}>
+                    {(p) => <Input {...p} icon={User} name="fullName" value={formData.fullName} onChange={handleChange} placeholder="e.g. Priya Sharma" autoComplete="off" />}
+                  </Field>
+                  <Field label="Email address" required error={errors.email}>
+                    {(p) => <Input {...p} icon={Mail} type="email" name="email" value={formData.email} onChange={handleChange} placeholder="student@example.com" autoComplete="off" />}
+                  </Field>
+                  <Field label="Password" required error={errors.password} hint="At least 6 characters">
+                    {(p) => <PasswordInput {...p} icon={Lock} name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" autoComplete="new-password" />}
+                  </Field>
+                  <Field label="Student ID" error={errors.studentId} hint="Optional — leave blank to auto-assign the next ID">
+                    {(p) => <Input {...p} icon={Hash} type="number" min="1" inputMode="numeric" name="studentId" value={formData.studentId} onChange={handleChange} placeholder="Auto" />}
+                  </Field>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">{label}</p>
-                  {loadingStudents
-                    ? <div className="h-7 w-10 bg-gray-200 rounded animate-pulse mt-0.5" />
-                    : <p className="text-2xl font-bold text-gray-900">{value}</p>
-                  }
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* ── INFO BANNER ── */}
-        <div className={`mb-6 p-4 ${deptStyle.lightBg} border ${deptStyle.border} rounded-xl flex items-start gap-3`}>
-          <FiBookOpen className={`w-5 h-5 ${deptStyle.text} mt-0.5 shrink-0`} />
-          <div className="text-sm">
-            <p className={`${deptStyle.text} font-semibold`}>
-              Student IDs are auto-assigned starting from 101 per department
-            </p>
-            <p className="text-gray-500 mt-0.5">
-              Departments: <strong>DB</strong>, <strong>SN</strong>.
-              Bulk Excel only needs <strong>Name</strong> and <strong>Email</strong> — no ID column required.
-              After bulk upload, a credentials Excel is auto-downloaded.
-            </p>
-          </div>
-        </div>
-
-        {/* ── BULK UPLOAD ── */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 shadow-sm">
-          <div className={`px-6 py-4 border-b border-gray-200 ${deptStyle.lightBg} flex items-center gap-3`}>
-            <div className={`w-10 h-10 rounded-xl ${deptStyle.bg} flex items-center justify-center shrink-0`}>
-              <FiUpload className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-gray-900">Bulk Add via Excel</h2>
-              <p className="text-xs text-gray-500">
-                Required: <strong>Name</strong>, <strong>Email</strong> ·
-                Optional: Password, Department (DB, SN) ·
-                <em> Credentials Excel auto-downloaded after upload</em>
-              </p>
-            </div>
-          </div>
-
-          <div className="p-6 space-y-5">
-            {/* File picker */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Excel File (.xlsx, .xls)
-              </label>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleExcelFileChange}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
-                  file:rounded-lg file:border-0 file:text-sm file:font-semibold
-                  file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
-              />
-              {excelFile && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-                  <span>Selected: <strong>{excelFile.name}</strong></span>
-                  <button onClick={clearExcel} className="text-gray-400 hover:text-red-500 transition-colors">
-                    <FiX className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Warnings */}
-            {bulkErrors.length > 0 && (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <p className="text-amber-800 font-semibold text-sm mb-2">Warnings:</p>
-                <ul className="text-sm text-amber-700 list-disc pl-5 space-y-1">
-                  {bulkErrors.map((err, i) => <li key={i}>{err}</li>)}
-                </ul>
-              </div>
-            )}
-
-            {/* Preview table */}
-            {excelPreview.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-bold text-gray-800">
-                    Preview — {excelPreview.length} student{excelPreview.length !== 1 ? "s" : ""}
-                  </p>
-                  <span className="text-xs text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full font-medium">
-                    IDs assigned by server (101, 102…)
+                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm">
+                  <Lock className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                  <span className="text-slate-600">
+                    Department: <strong className="text-slate-900">{adminDepartment}</strong>
+                    <span className="text-slate-500"> — you can only add students to your department.</span>
                   </span>
                 </div>
 
-                <div className="overflow-x-auto border border-gray-200 rounded-xl max-h-64">
-                  <table className="min-w-full divide-y divide-gray-100">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        {["#", "Full Name", "Email", "Department", "Password"].map((h) => (
-                          <th key={h} className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-50">
-                      {excelPreview.map((row, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-xs text-gray-400 font-mono">{i + 1}</td>
-                          <td className="px-4 py-2.5 text-sm font-medium text-gray-800">{row.name}</td>
-                          <td className="px-4 py-2.5 text-sm text-gray-500">{row.email}</td>
-                          <td className="px-4 py-2.5">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-md
-                              ${getDeptStyle(row.department).lightBg} ${getDeptStyle(row.department).text}`}>
-                              {row.department}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-gray-400 font-mono">{row.password}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex justify-end">
+                  <Button type="submit" icon={UserPlus} loading={isSubmitting}>
+                    {isSubmitting ? "Adding student…" : "Add student"}
+                  </Button>
                 </div>
+              </form>
+            </Card>
+          )}
 
-                <div className="mt-3 flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-lg">
-                  <FiDownload className="w-4 h-4 text-green-600 shrink-0" />
-                  <p className="text-xs text-green-700 font-medium">
-                    After upload, a credentials Excel (Student ID, Name, Email, Password) will be automatically downloaded.
-                  </p>
-                </div>
-
-                <button
-                  onClick={confirmBulkAdd}
-                  disabled={bulkLoading}
-                  className={`mt-4 inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-white text-sm font-bold
-                    ${deptStyle.bg} ${deptStyle.hoverBg} disabled:opacity-50 disabled:cursor-not-allowed
-                    focus:outline-none focus:ring-2 focus:ring-offset-2 ${deptStyle.ring} transition-all shadow-sm`}
+          {/* ── BULK UPLOAD ── */}
+          {mode === "bulk" && (
+            <Card>
+              <CardHeader
+                title="Bulk add from Excel"
+                description="Required columns: Name, Email. Optional: Password, Department."
+                icon={FileSpreadsheet}
+              />
+              <div className="card-body space-y-4">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Choose an Excel file"
+                  onClick={() => fileInputRef.current?.click()}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click(); } }}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragOver(false); handleExcelFile(e.dataTransfer.files[0]); }}
+                  className={cn(
+                    "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors",
+                    dragOver ? "border-brand-500 bg-brand-50"
+                      : excelFile ? "border-emerald-300 bg-emerald-50/50"
+                      : "border-slate-300 bg-slate-50 hover:border-brand-400 hover:bg-brand-50/50"
+                  )}
                 >
-                  {bulkLoading
-                    ? <><FiRefreshCw className="w-4 h-4 animate-spin" /> Uploading &amp; Downloading…</>
-                    : <><FiCheckCircle className="w-4 h-4" /> Confirm &amp; Add {excelPreview.length} Student{excelPreview.length !== 1 ? "s" : ""}</>
-                  }
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── SINGLE STUDENT FORM ── */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 shadow-sm">
-          <div className={`px-6 py-4 border-b border-gray-200 ${deptStyle.lightBg} flex items-center gap-3`}>
-            <div className={`w-10 h-10 rounded-xl ${deptStyle.bg} flex items-center justify-center shrink-0`}>
-              <FiPlusCircle className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-gray-900">New Student Registration</h2>
-              <p className="text-xs text-gray-500">Student ID is auto-assigned after submission</p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-              {/* Full Name */}
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-gray-700">
-                  Full Name <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiUser className={`w-4 h-4 ${errors.fullName ? "text-red-400" : "text-gray-400"}`} />
-                  </div>
                   <input
-                    type="text" name="fullName" value={formData.fullName} onChange={handleChange}
-                    placeholder="John Doe"
-                    className={`block w-full pl-10 pr-3 py-2.5 border rounded-lg text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors
-                      ${errors.fullName ? "border-red-300 bg-red-50" : "border-gray-300 bg-white"}`}
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => handleExcelFile(e.target.files[0])}
                   />
+                  {excelFile ? (
+                    <>
+                      <FileSpreadsheet className="mb-2 h-8 w-8 text-emerald-600" aria-hidden="true" />
+                      <p className="text-sm font-semibold text-slate-900">{excelFile.name}</p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); clearExcel(); }}
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-rose-600 hover:underline"
+                      >
+                        <X className="h-3.5 w-3.5" /> Remove file
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="mb-2 h-8 w-8 text-slate-400" aria-hidden="true" />
+                      <p className="text-sm font-semibold text-slate-800">
+                        Drop an Excel file here, or <span className="text-brand-700 underline">browse</span>
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">.xlsx or .xls</p>
+                    </>
+                  )}
                 </div>
-                {errors.fullName && (
-                  <p className="text-xs text-red-600 flex items-center gap-1">
-                    <FiAlertCircle className="w-3.5 h-3.5" /> {errors.fullName}
-                  </p>
-                )}
-              </div>
 
-              {/* Email */}
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-gray-700">
-                  Email Address <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiMail className={`w-4 h-4 ${errors.email ? "text-red-400" : "text-gray-400"}`} />
-                  </div>
-                  <input
-                    type="email" name="email" value={formData.email} onChange={handleChange}
-                    placeholder="student@example.com"
-                    className={`block w-full pl-10 pr-3 py-2.5 border rounded-lg text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors
-                      ${errors.email ? "border-red-300 bg-red-50" : "border-gray-300 bg-white"}`}
-                  />
-                </div>
-                {errors.email && (
-                  <p className="text-xs text-red-600 flex items-center gap-1">
-                    <FiAlertCircle className="w-3.5 h-3.5" /> {errors.email}
-                  </p>
-                )}
-              </div>
-
-              {/* Password */}
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-gray-700">
-                  Password <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiLock className={`w-4 h-4 ${errors.password ? "text-red-400" : "text-gray-400"}`} />
-                  </div>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="password" value={formData.password} onChange={handleChange}
-                    placeholder="••••••••"
-                    className={`block w-full pl-10 pr-10 py-2.5 border rounded-lg text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors
-                      ${errors.password ? "border-red-300 bg-red-50" : "border-gray-300 bg-white"}`}
-                  />
-                  <button type="button" onClick={() => setShowPassword((s) => !s)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                    {showPassword
-                      ? <FiEyeOff className="w-4 h-4 text-gray-400 hover:text-gray-600" />
-                      : <FiEye    className="w-4 h-4 text-gray-400 hover:text-gray-600" />}
-                  </button>
-                </div>
-                {errors.password && (
-                  <p className="text-xs text-red-600 flex items-center gap-1">
-                    <FiAlertCircle className="w-3.5 h-3.5" /> {errors.password}
-                  </p>
-                )}
-              </div>
-
-             
-
-              {/* Department — locked */}
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-gray-700">Department</label>
-                <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${deptStyle.border} ${deptStyle.lightBg}`}>
-                  <FiUsers className={`w-4 h-4 shrink-0 ${deptStyle.text}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-bold ${deptStyle.text}`}>
-                      {adminDepartment} — {DEPT_LABELS[adminDepartment] || adminDepartment}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Locked · you can only add students to your department
-                    </p>
-                  </div>
-                  <span className="text-xl shrink-0">{deptStyle.icon}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* ID hint */}
-            <div className="mt-5 flex items-center gap-2 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <FiHash className="w-4 h-4 text-gray-400 shrink-0" />
-              <p className="text-xs text-gray-500">
-                Leave <strong>Student ID</strong> blank to auto-assign the next available ID for your department
-                (e.g. <span className="font-mono font-bold text-gray-700">101</span>,{" "}
-                <span className="font-mono font-bold text-gray-700">102</span>…), or
-                enter a custom ID manually. IDs must be unique within the same department.
-              </p>
-            </div>
-
-            <button
-              type="submit" disabled={isSubmitting}
-              className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3
-                bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl
-                disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2
-                focus:ring-blue-500 transition-all text-sm shadow-sm">
-              {isSubmitting
-                ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Adding Student…</>
-                : <><FiPlusCircle className="w-4 h-4" /> Add Student</>
-              }
-            </button>
-          </form>
-        </div>
-
-        {/* ── STUDENTS LIST ── */}
-        {(loadingStudents || deptStudents.length > 0) && (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <FiUsers className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">
-                    {adminDepartment} — {DEPT_LABELS[adminDepartment]} Students
-                  </h3>
-                  <p className="text-xs text-gray-500">Sorted by Student ID (ascending)</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {/* ✅ UPDATED: Download All button — now fetches from backend with passwords */}
-                {!loadingStudents && deptStudents.length > 0 && (
-                  <button
-                    onClick={downloadAllStudents}
-                    disabled={downloadingAll}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700
-                      text-white text-xs font-bold rounded-lg transition-colors shadow-sm
-                      disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Download Excel with Student ID, Name, Email, Password, Department, Status, Join Date"
-                  >
-                    {downloadingAll
-                      ? <><FiRefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-                      : <><FiShield className="w-3.5 h-3.5" /> Download All with Passwords</>
-                    }
-                  </button>
+                {bulkErrors.length > 0 && (
+                  <Alert tone="warning" title="Check your file">
+                    <ul className="mt-1 space-y-0.5 text-xs">
+                      {bulkErrors.map((err, i) => <li key={i}>{err}</li>)}
+                    </ul>
+                  </Alert>
                 )}
 
-                <span className={`px-3 py-1 ${deptStyle.lightBg} ${deptStyle.text} rounded-lg text-xs font-bold`}>
-                  {deptStudents.length} Total
-                </span>
-              </div>
-            </div>
-
-            {/* ✅ NEW: Info bar below the header */}
-            {!loadingStudents && deptStudents.length > 0 && (
-              <div className="px-6 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
-                <FiShield className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <p className="text-xs text-emerald-700 font-medium">
-                  "Download All with Passwords" includes: Student ID, Full Name, Email, Password, Department, Status, and Join Date.
-                  Students added before this feature will show <strong>N/A</strong> for password.
-                </p>
-              </div>
-            )}
-
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-100">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {["ID", "Student Name", "Email", "Join Date", "Status"].map((h) => (
-                      <th key={h} className="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {loadingStudents
-                    ? Array.from({ length: 4 }).map((_, i) => (
-                        <tr key={i}>
-                          {[36, 120, 150, 70, 55].map((w, j) => (
-                            <td key={j} className="px-6 py-4">
-                              <div className="h-4 bg-gray-200 rounded-full animate-pulse" style={{ width: w }} />
-                            </td>
+                {excelPreview.length > 0 && (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Preview · {excelPreview.length} student{excelPreview.length !== 1 ? "s" : ""}
+                      </p>
+                      <Badge>IDs assigned by server</Badge>
+                    </div>
+                    <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+                      <table className="table">
+                        <thead className="sticky top-0">
+                          <tr><th>#</th><th>Full name</th><th>Email</th><th>Department</th><th>Password</th></tr>
+                        </thead>
+                        <tbody>
+                          {excelPreview.map((row, i) => (
+                            <tr key={i}>
+                              <td className="font-mono text-xs text-slate-400">{i + 1}</td>
+                              <td className="font-medium text-slate-900">{row.name}</td>
+                              <td className="text-slate-600">{row.email}</td>
+                              <td><Badge tone="brand">{row.department}</Badge></td>
+                              <td className="font-mono text-xs text-slate-500">{row.password}</td>
+                            </tr>
                           ))}
-                        </tr>
-                      ))
-                    : deptStudents.slice(0, 10).map((student) => {
-                        const sd = getDeptStyle(student.department);
-                        return (
-                          <tr key={student._id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-6 py-3.5">
-                              <span className={`inline-flex items-center justify-center min-w-[3rem] px-2 py-1
-                                ${sd.lightBg} ${sd.text} text-xs font-black rounded-lg font-mono`}>
-                                {student.studentId ?? "—"}
-                              </span>
-                            </td>
-                            <td className="px-6 py-3.5">
-                              <div className="flex items-center gap-2.5">
-                                <div className={`w-8 h-8 rounded-lg ${sd.lightBg} flex items-center justify-center shrink-0`}>
-                                  <span className={`text-sm font-bold ${sd.text}`}>
-                                    {(student.name || student.fullName)?.[0]?.toUpperCase()}
-                                  </span>
-                                </div>
-                                <span className="text-sm font-medium text-gray-800">
-                                  {student.name || student.fullName}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-3.5 text-sm text-gray-500">{student.email}</td>
-                            <td className="px-6 py-3.5 text-sm text-gray-400">
-                              {student.joinDate || student.createdAt?.split("T")[0] || "—"}
-                            </td>
-                            <td className="px-6 py-3.5">
-                              <span className={`px-2.5 py-1 text-xs font-bold rounded-full
-                                ${student.status === "active"
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-gray-100 text-gray-500"}`}>
-                                {student.status === "active" ? "Active" : "Inactive"}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })
-                  }
-                </tbody>
-              </table>
-            </div>
-
-            {deptStudents.length > 10 && (
-              <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-center">
-                <button className={`text-sm font-semibold ${deptStyle.text} hover:underline transition-colors`}>
-                  View all {deptStudents.length} students →
-                </button>
+                        </tbody>
+                      </table>
+                    </div>
+                    <Alert tone="success" icon={Download}>
+                      After upload, a credentials Excel (Student ID, Name, Email, Password) downloads automatically.
+                    </Alert>
+                    <div className="flex justify-end">
+                      <Button icon={CheckCircle2} onClick={confirmBulkAdd} loading={bulkLoading}>
+                        {bulkLoading ? "Uploading…" : `Add ${excelPreview.length} student${excelPreview.length !== 1 ? "s" : ""}`}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
+            </Card>
+          )}
+        </div>
+
+        {/* ── RECENT STUDENTS ── */}
+        <Card className="xl:col-span-2 xl:self-start">
+          <CardHeader
+            title="Recently added"
+            description={`${deptStudents.length} in ${adminDepartment || "your department"}`}
+            icon={Users}
+          />
+          {loadingStudents ? (
+            <div className="space-y-3 p-5">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+          ) : deptStudents.length === 0 ? (
+            <EmptyState icon={Inbox} title="No students yet" description="Students you add will appear here." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {deptStudents.slice(0, 8).map((student) => (
+                <li key={student._id} className="flex items-center gap-3 px-5 py-3">
+                  <Avatar name={student.name || student.fullName} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900">{student.name || student.fullName}</p>
+                    <p className="truncate text-xs text-slate-500">{student.email}</p>
+                  </div>
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700">
+                    {student.studentId ?? "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="space-y-2 border-t border-slate-100 p-4">
+            <Button
+              variant="secondary"
+              icon={ShieldCheck}
+              fullWidth
+              onClick={downloadAllStudents}
+              loading={downloadingAll}
+              disabled={loadingStudents || !deptStudents.length}
+              title="Excel with Student ID, Name, Email, Password, Department, Status and Join Date"
+            >
+              {downloadingAll ? "Generating…" : "Download all with passwords"}
+            </Button>
+            <p className="text-center text-xs text-slate-500">
+              Students added before password export was available show <strong>N/A</strong>.
+            </p>
+            {deptStudents.length > 8 && (
+              <Link to="/admin/view-students" className="flex items-center justify-center gap-1 pt-1 text-sm font-semibold text-brand-700 hover:underline">
+                View all {deptStudents.length} students <ArrowRight className="h-4 w-4" />
+              </Link>
             )}
           </div>
-        )}
+        </Card>
       </div>
-    </div>
+    </>
   );
 };
 

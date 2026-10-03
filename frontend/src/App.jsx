@@ -1,15 +1,17 @@
-import { useState } from 'react'
 import AppRoutes from "./routes/AppRoutes";
 import './index.css'
 import { Provider } from "react-redux";
 import { store } from "./store/index";
+import { ToastProvider } from "./components/ui";
 
 function App() {
 
   return (
     <>
       <Provider  store={store}>
-        <AppRoutes />
+        <ToastProvider>
+          <AppRoutes />
+        </ToastProvider>
       </Provider>
     </>
   )

@@ -1,6 +1,6 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import Sidebar from "../components/layout/Sidebar";
+import AdminLayout from "../components/layout/AdminLayout";
 import Home from "../pages/Home";
 import SuperAdminDashboard from "../pages/superadmin/SuperAdminDashboard";
 import AdminDashboard from "../pages/admin/AdminDashboard";
@@ -30,16 +30,6 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   return children;
 };
 
-// ─── ADMIN LAYOUT (sidebar from components/layout/Sidebar) ───────────────────
-const AdminLayout = ({ children }) => (
-  <div className="app">
-    <Sidebar />
-    <div className="main-content">
-      <div className="page-container">{children}</div>
-    </div>
-  </div>
-);
-
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 const AppRouter = () => {
   return (
@@ -48,14 +38,13 @@ const AppRouter = () => {
       {/* ── Public ── */}
       <Route path="/" element={<Home />} />
 
-      {/* ── Super Admin ── */}
-      <Route path="/superadmin/*"           element={<SuperAdminDashboard />} />
-      {/* <Route path="/superadmin/dashboard"   element={<SuperAdminDashboard />} /> */}
-      <Route path="/superadmin/admins"      element={<SuperAdminDashboard />} />
-      <Route path="/superadmin/students"    element={<SuperAdminDashboard />} />
-      <Route path="/superadmin/departments" element={<SuperAdminDashboard />} />
-      <Route path="/superadmin/settings"    element={<SuperAdminDashboard />} />
-      
+      {/* ── Super Admin ── (tab is derived from the URL inside SuperAdminDashboard) */}
+      <Route path="/superadmin/*" element={
+        <ProtectedRoute allowedRoles={["superadmin"]}>
+          <SuperAdminDashboard />
+        </ProtectedRoute>
+      }/>
+
       <Route
         path="/admin/qr-scanner"
         element={

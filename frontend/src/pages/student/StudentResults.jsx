@@ -1,69 +1,43 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { Award, CheckCircle2, XCircle, MinusCircle, FileText, CalendarDays, RefreshCw, Inbox, TrendingUp, Star } from "lucide-react";
 import API from "@/services/api";
-import {
-  Award, CheckCircle, XCircle, FileText, Calendar,
-  RefreshCw, AlertCircle, Inbox, Star, TrendingUp,
-} from "lucide-react";
 import { StudentLayout } from "../../components/student/StudentLayout";
+import {
+  PageHeader, IconButton, StatCard, Card, Badge, PassFailBadge, EmptyState, ErrorState, Skeleton,
+} from "../../components/ui";
+import { formatIST } from "../../utils/time";
 
-// ─── Grade Styles ─────────────────────────────────────────────────────────────
-const GRADE_STYLE = {
-  'A+': { bg: "bg-emerald-100", text: "text-emerald-700", border: "border-emerald-200", label: "Outstanding" },
-  'A':  { bg: "bg-blue-100",    text: "text-blue-700",    border: "border-blue-200",    label: "Excellent"   },
-  'B+': { bg: "bg-indigo-100",  text: "text-indigo-700",  border: "border-indigo-200",  label: "Very Good"   },
-  'B':  { bg: "bg-indigo-100",  text: "text-indigo-700",  border: "border-indigo-200",  label: "Good"        },
-  'C':  { bg: "bg-yellow-100",  text: "text-yellow-700",  border: "border-yellow-200",  label: "Average"     },
-  'D':  { bg: "bg-orange-100",  text: "text-orange-700",  border: "border-orange-200",  label: "Pass"        },
-  'F':  { bg: "bg-red-100",     text: "text-red-700",     border: "border-red-200",     label: "Fail"        },
+const GRADE_LABEL = {
+  'A+': "Outstanding", 'A': "Excellent", 'B+': "Very good", 'B': "Good", 'C': "Average", 'D': "Pass", 'F': "Fail",
 };
 
-const fmt = (iso) => iso 
-  ? new Date(iso).toLocaleString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: true,
-    }) 
-  : "—";
-
-// ─── Progress Ring ────────────────────────────────────────────────────────────
-const Ring = ({ pct, grade }) => {
-  const gs = GRADE_STYLE[grade] || GRADE_STYLE["F"];
-  const r = 36;
+// Score ring — colour follows the pass/fail band; the number and label carry the meaning.
+const Ring = ({ pct }) => {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  const r = 34;
   const circ = 2 * Math.PI * r;
-  const dash = (pct / 100) * circ;
-  const colorMap = { 
-    'A+': "#10b981", 'A': "#3b82f6", 'B+': "#6366f1", 'B': "#6366f1",
-    'C': "#eab308", 'D': "#f97316", 'F': "#ef4444" 
-  };
-  const color = colorMap[grade] || "#6b7280";
-
+  const color = p >= 70 ? "#059669" : p >= 40 ? "#d97706" : "#e11d48";
   return (
-    <div className="relative w-20 h-20 shrink-0">
-      <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="#e5e7eb" strokeWidth="7" />
+    <div className="relative h-20 w-20 shrink-0" aria-hidden="true">
+      <svg className="h-full w-full -rotate-90" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#e2e8f0" strokeWidth="7" />
         <circle cx="40" cy="40" r={r} fill="none" stroke={color} strokeWidth="7"
-          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
+          strokeDasharray={`${(p / 100) * circ} ${circ}`} strokeLinecap="round" />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-base font-black text-gray-800">{pct}%</span>
-        <span className={`text-xs font-bold ${gs.text}`}>{grade}</span>
-      </div>
+      <span className="absolute inset-0 flex items-center justify-center text-base font-bold tabular text-slate-900">{p}%</span>
     </div>
   );
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const StudentResults = () => {
-  const navigate = useNavigate();
-
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadResults = async () => {
-    setLoading(true);
-    setError("");
-
+  // Writes state only after the request settles (safe to call from the mount effect).
+  const fetchResults = useCallback(async () => {
     // Same check as StudentDashboard
     const token = localStorage.getItem("token");
     const role = localStorage.getItem("userRole");
@@ -77,6 +51,7 @@ const StudentResults = () => {
     try {
       const res = await API.get("/student/results");
       setResults(res.data.results || []);
+      setError("");
     } catch (err) {
       console.error("Results fetch error:", err.response?.data || err);
 
@@ -90,149 +65,94 @@ const StudentResults = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Load results on mount
-  useEffect(() => {
-    loadResults();
   }, []);
+
+  useEffect(() => { fetchResults(); }, [fetchResults]);
+
+  const loadResults = () => { setLoading(true); fetchResults(); };
 
   // Summary Stats
   const totalExams = results.length;
-  const avgScore = totalExams > 0 
-    ? Math.round(results.reduce((sum, r) => sum + (r.percentage || 0), 0) / totalExams) 
+  const avgScore = totalExams > 0
+    ? Math.round(results.reduce((sum, r) => sum + (r.percentage || 0), 0) / totalExams)
     : 0;
   const passed = results.filter(r => (r.percentage || 0) >= 40).length;
   const best = results.reduce((b, r) => (r.percentage || 0) > (b?.percentage || -1) ? r : b, null);
 
   return (
     <StudentLayout>
-      <div className="p-6 max-w-5xl mx-auto">
+      <PageHeader
+        title="My results"
+        description="Scores for every exam you've submitted. The pass mark is 40%."
+        actions={<IconButton icon={RefreshCw} label="Refresh results" variant="secondary" loading={loading} onClick={loadResults} />}
+      />
 
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Results</h1>
-            <p className="text-sm text-gray-500">View all your exam performances</p>
-          </div>
-          <button 
-            onClick={loadResults} 
-            disabled={loading}
-            className="p-3 border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
-          </button>
+      {error ? (
+        <Card><ErrorState title="Couldn't load your results" message={error} onRetry={loadResults} /></Card>
+      ) : loading ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}
         </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-6 mb-8 flex items-center gap-4">
-            <AlertCircle className="w-6 h-6 text-red-500 shrink-0" />
-            <div className="flex-1">
-              <p className="font-semibold text-red-700">{error}</p>
-              <p className="text-sm text-red-600 mt-1">
-                Make sure you are logged in with a student account.
-              </p>
-            </div>
-            <button 
-              onClick={loadResults}
-              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium"
-            >
-              Retry
-            </button>
+      ) : results.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Inbox}
+            title="No results yet"
+            description="Results appear here as soon as you submit an exam."
+            action={<Link to="/student/dashboard" className="btn btn-md btn-secondary">Go to my exams</Link>}
+          />
+        </Card>
+      ) : (
+        <>
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatCard label="Exams taken"   value={totalExams}       icon={FileText} />
+            <StatCard label="Average score" value={`${avgScore}%`}   icon={TrendingUp} tone="info" />
+            <StatCard label="Passed"        value={`${passed} / ${totalExams}`} icon={CheckCircle2} tone="success" />
+            <StatCard label="Best score"    value={best ? `${best.percentage}%` : "—"} hint={best?.subject} icon={Award} tone="warning" />
           </div>
-        )}
 
-        {/* Loading State */}
-        {loading && (
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-32 bg-gray-100 rounded-2xl animate-pulse" />
+          <ul className="space-y-3">
+            {results.map(r => (
+              <li key={r._id}>
+                <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-6 sm:p-5">
+                  <div className="flex items-center gap-4 sm:contents">
+                    <Ring pct={r.percentage} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="truncate text-base font-semibold text-slate-900">{r.subject}</h2>
+                        <PassFailBadge percentage={r.percentage} />
+                      </div>
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                        <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> Submitted {formatIST(r.submittedAt)}
+                      </p>
+                      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                        <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />{r.correctCount || 0} correct</span>
+                        <span className="flex items-center gap-1.5"><XCircle className="h-4 w-4 text-rose-600" aria-hidden="true" />{r.wrongCount || 0} wrong</span>
+                        {r.skippedCount != null && (
+                          <span className="flex items-center gap-1.5"><MinusCircle className="h-4 w-4 text-slate-400" aria-hidden="true" />{r.skippedCount} skipped</span>
+                        )}
+                        {r.marksPerQuestion != null && (
+                          <span className="flex items-center gap-1.5"><Star className="h-4 w-4 text-slate-400" aria-hidden="true" />{r.marksPerQuestion} marks / question</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3 sm:block sm:border-0 sm:pt-0 sm:text-right">
+                    <div>
+                      <p className="text-2xl font-bold tabular text-slate-900">{r.score}<span className="text-base font-medium text-slate-400"> / {r.totalMarks}</span></p>
+                      <p className="text-xs text-slate-500">marks</p>
+                    </div>
+                    {r.grade && (
+                      <Badge tone="brand" className="sm:mt-2">Grade {r.grade}{GRADE_LABEL[r.grade] ? ` · ${GRADE_LABEL[r.grade]}` : ""}</Badge>
+                    )}
+                  </div>
+                </Card>
+              </li>
             ))}
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!loading && !error && results.length === 0 && (
-          <div className="text-center py-20">
-            <Inbox className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-xl font-semibold text-gray-500">No results yet</p>
-            <p className="text-gray-400 mt-2">Your submitted exam results will appear here</p>
-          </div>
-        )}
-
-        {/* Results List */}
-        {!loading && results.length > 0 && (
-          <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              {[
-                { label: "Total Exams", val: totalExams, icon: FileText, color: "text-gray-700", bg: "bg-gray-100" },
-                { label: "Average Score", val: `${avgScore}%`, icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
-                { label: "Passed", val: passed, icon: CheckCircle, color: "text-green-600", bg: "bg-green-50" },
-                { label: "Best Score", val: best ? `${best.percentage}%` : "—", icon: Award, color: "text-indigo-600", bg: "bg-indigo-50" },
-              ].map(({ label, val, icon: Icon, color, bg }) => (
-                <div key={label} className="bg-white rounded-2xl border border-gray-200 p-5 flex items-center gap-4">
-                  <div className={`w-10 h-10 ${bg} rounded-xl flex items-center justify-center`}>
-                    <Icon className={`w-5 h-5 ${color}`} />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">{label}</p>
-                    <p className={`text-2xl font-bold ${color}`}>{val}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Result Cards */}
-            <div className="space-y-4">
-              {results.map(r => {
-                const gs = GRADE_STYLE[r.grade] || GRADE_STYLE["F"];
-                return (
-                  <div 
-                    key={r._id} 
-                    className="bg-white border border-gray-100 hover:border-gray-300 rounded-2xl p-6 flex items-center gap-6 transition-all"
-                  >
-                    <Ring pct={r.percentage} grade={r.grade} />
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <p className="font-semibold text-lg text-gray-900">{r.subject}</p>
-                        <span className={`px-3 py-1 text-xs font-bold rounded-full border ${gs.bg} ${gs.text} ${gs.border}`}>
-                          {r.grade}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm text-gray-500">
-                        <span className="flex items-center gap-1.5">
-                          <CheckCircle className="w-4 h-4 text-emerald-500" /> 
-                          {r.correctCount || 0} Correct
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <XCircle className="w-4 h-4 text-red-500" /> 
-                          {r.wrongCount || 0} Wrong
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <Star className="w-4 h-4 text-yellow-500" /> 
-                          {r.marksPerQuestion} marks/Q
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <Calendar className="w-4 h-4" /> 
-                          {fmt(r.submittedAt)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <p className="text-3xl font-bold text-gray-900">{r.score}</p>
-                      <p className="text-sm text-gray-500">/ {r.totalMarks}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+          </ul>
+        </>
+      )}
     </StudentLayout>
   );
 };

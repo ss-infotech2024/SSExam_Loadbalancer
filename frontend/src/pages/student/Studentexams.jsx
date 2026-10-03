@@ -26,6 +26,9 @@ const Studentexams = ({ exam, onExamEnd }) => {
   const faceCheckInterval = useRef(null);
   const warningTimeout = useRef(null);
 
+  // Per-exam camera proctoring — missing field (older exams) means ON
+  const proctorCamera = exam?.cameraEnabled !== false;
+
   const totalQuestions = exam.questions?.length || 0;
   const marksPerQuestion = exam.marksPerQuestion || 1;
   const totalMarks = totalQuestions * marksPerQuestion;
@@ -43,8 +46,9 @@ const Studentexams = ({ exam, onExamEnd }) => {
     return () => clearInterval(timer);
   }, [timeLeft]);
 
-  // Camera Setup
+  // Camera Setup (skipped entirely when camera proctoring is OFF)
   useEffect(() => {
+    if (!proctorCamera) return;
     const setupCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -201,10 +205,10 @@ const Studentexams = ({ exam, onExamEnd }) => {
             <p className="text-xs text-gray-500">Question {currentIndex + 1} of {totalQuestions}</p>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+            {proctorCamera && <div className="flex items-center gap-2">
               {cameraEnabled ? <Camera className="w-4 h-4 text-green-600" /> : <CameraOff className="w-4 h-4 text-red-600" />}
               <span className="text-xs font-medium">{faceDetected ? "Face detected" : "Face not detected"}</span>
-            </div>
+            </div>}
             {warnings > 0 && (
               <div className="flex items-center gap-1 px-2 py-1 bg-red-50 rounded-lg">
                 <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
@@ -220,9 +224,11 @@ const Studentexams = ({ exam, onExamEnd }) => {
       </div>
 
       {/* Camera Preview */}
-      <div className="absolute top-20 right-6 z-10">
-        <video ref={videoRef} autoPlay playsInline muted className="w-32 h-24 rounded-lg border-2 border-white shadow-lg object-cover" />
-      </div>
+      {proctorCamera && (
+        <div className="absolute top-20 right-6 z-10">
+          <video ref={videoRef} autoPlay playsInline muted className="w-32 h-24 rounded-lg border-2 border-white shadow-lg object-cover" />
+        </div>
+      )}
 
       {/* Main Exam Content */}
       <div className="flex-1 flex max-w-7xl mx-auto w-full gap-6 p-6 overflow-hidden">

@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Clock, AlertCircle, Flag, ChevronLeft, ChevronRight,
-  AlertTriangle, Shield, Zap, Users, Video,
-  CheckCircle, XCircle, Award, BarChart3, Download, Home,
-  Eye, EyeOff, UserCheck, UserX, Wifi, WifiOff, Camera, Play,
-  RefreshCw,
+  Clock, AlertCircle, Flag, ChevronLeft, ChevronRight, AlertTriangle, ShieldCheck, Users, Video, VideoOff,
+  CheckCircle2, XCircle, Download, Home, Eye, EyeOff, UserCheck, UserX, Camera, CameraOff, Play,
+  LayoutGrid, Send, Maximize, Loader2, RefreshCw, Timer, X,
 } from "lucide-react";
 import API from "@/services/api";
+import { Button, Modal, Badge } from "../../components/ui";
+import { cn } from "../../utils/cn";
 
 // Exam requests keep their own timeout (applied per request on the shared API instance)
 const EXAM_REQUEST_TIMEOUT = 30000;
@@ -30,14 +30,6 @@ const VIOLATION_COOLDOWN_MS = 7000;
 const DETECTION_INTERVAL_MS = 1500;
 const MAX_WARNINGS          = 5;
 
-// ─── Google Fonts ──────────────────────────────────────────────────────────
-const FontLink = () => (
-  <link
-    href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap"
-    rel="stylesheet"
-  />
-);
-
 // ══════════════════════════════════════════════════════════════════════════════
 const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
   const navigate = useNavigate();
@@ -58,6 +50,8 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
   const [loadError,   setLoadError]   = useState("");
   const [fetchStatus, setFetchStatus] = useState("Initialising...");
   const [camStatus,   setCamStatus]   = useState("idle");
+  // Per-exam camera proctoring — undefined (older exams) means ON
+  const [cameraEnabled, setCameraEnabled] = useState(exam?.cameraEnabled !== false);
 
   // proctoring
   const [cameraActive,     setCameraActive]     = useState(false);
@@ -72,6 +66,10 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
 
   // result — from server
   const [resultData, setResultData] = useState(null);
+  // Marks per question for display (from GET /student/exams/:id)
+  const [marksPerQ, setMarksPerQ] = useState(exam?.marksPerQuestion || 1);
+  // Mobile question palette
+  const [showPalette, setShowPalette] = useState(false);
 
   // ── refs ───────────────────────────────────────────────────────────────────
   const videoRef             = useRef(null);
@@ -188,7 +186,8 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
       });
 
       setPhase("result");
-      onExamEnd(data);
+      // onExamEnd() runs when the student leaves the result screen — calling it here
+      // made the parent unmount this component before the result could be seen.
     } catch (err) {
       console.error("[submit]", err);
       alert(err.response?.data?.message || "Failed to submit exam. Please try again.");
@@ -198,7 +197,7 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
       setSubmitting(false);
       setPhase("running");
     }
-  }, [exam, onExamEnd, stopAll]);
+  }, [exam, stopAll]);
 
   // ── Violation handler ──────────────────────────────────────────────────────
   const handleViolation = useCallback((reason) => {
@@ -344,7 +343,9 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
         const dur = (data.duration || exam.duration || 60) * 60;
         setQuestions(qs);
         questionsRef.current     = qs;
+        setCameraEnabled((data.cameraEnabled ?? exam.cameraEnabled) !== false);
         setTimeRemaining(dur);
+        setMarksPerQ(data.marksPerQuestion ?? exam.marksPerQuestion ?? 1);
         timeRemainingRef.current = dur;
         setFetchStatus("Ready to begin!");
         setPhase("preflight");
@@ -406,56 +407,60 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
 
   // ── STEP 2: User clicks "Start Exam" ──────────────────────────────────────
   const handleStartExam = useCallback(async () => {
-    setCamStatus("requesting");
-    setFetchStatus("Requesting camera access...");
+    // Camera OFF for this exam → no getUserMedia, no face-api, no detection loop.
+    // Fullscreen / tab / key / right-click checks below still run.
+    if (cameraEnabled) {
+      setCamStatus("requesting");
+      setFetchStatus("Requesting camera access...");
 
-    // Camera — MUST be inside a user-gesture handler
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const vid = videoRef.current;
-      if (vid) {
-        vid.srcObject = stream;
-        await new Promise((resolve, reject) => {
-          if (vid.readyState >= 2) { vid.play().then(resolve).catch(reject); return; }
-          vid.onloadedmetadata = () => vid.play().then(resolve).catch(reject);
-          vid.onerror = reject;
+      // Camera — MUST be inside a user-gesture handler
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+          audio: false,
         });
-        cameraActiveRef.current = true;
-        setCameraActive(true);
-        setCameraError("");
-        setCamStatus("ok");
+        streamRef.current = stream;
+        const vid = videoRef.current;
+        if (vid) {
+          vid.srcObject = stream;
+          await new Promise((resolve, reject) => {
+            if (vid.readyState >= 2) { vid.play().then(resolve).catch(reject); return; }
+            vid.onloadedmetadata = () => vid.play().then(resolve).catch(reject);
+            vid.onerror = reject;
+          });
+          cameraActiveRef.current = true;
+          setCameraActive(true);
+          setCameraError("");
+          setCamStatus("ok");
+        }
+      } catch (err) {
+        console.error("[camera]", err);
+        cameraActiveRef.current = false;
+        const denied = err.name === "NotAllowedError";
+        setCamStatus(denied ? "denied" : "error");
+        setCameraError(
+          denied         ? "Camera permission denied. Allow camera in browser settings and retry."
+          : err.name === "NotFoundError" ? "No camera found on this device."
+          : "Camera unavailable — exam will continue without proctoring."
+        );
+        setCameraActive(false);
       }
-    } catch (err) {
-      console.error("[camera]", err);
-      cameraActiveRef.current = false;
-      const denied = err.name === "NotAllowedError";
-      setCamStatus(denied ? "denied" : "error");
-      setCameraError(
-        denied         ? "Camera permission denied. Allow camera in browser settings and retry."
-        : err.name === "NotFoundError" ? "No camera found on this device."
-        : "Camera unavailable — exam will continue without proctoring."
-      );
-      setCameraActive(false);
-    }
 
-    // face-api models
-    setFetchStatus("Loading AI proctoring models...");
-    try {
-      await loadScript(FACEAPI_CDN);
-      if (window.faceapi) {
-        await window.faceapi.nets.tinyFaceDetector.loadFromUri(WEIGHTS_URL);
-        await window.faceapi.nets.faceLandmark68Net.loadFromUri(WEIGHTS_URL);
-        setModelStatus("ready");
-        startDetection(true);
-      } else throw new Error("faceapi not on window");
-    } catch (err) {
-      console.warn("[face-api] fallback:", err.message);
-      setModelStatus("fallback");
-      startDetection(false);
+      // face-api models
+      setFetchStatus("Loading AI proctoring models...");
+      try {
+        await loadScript(FACEAPI_CDN);
+        if (window.faceapi) {
+          await window.faceapi.nets.tinyFaceDetector.loadFromUri(WEIGHTS_URL);
+          await window.faceapi.nets.faceLandmark68Net.loadFromUri(WEIGHTS_URL);
+          setModelStatus("ready");
+          startDetection(true);
+        } else throw new Error("faceapi not on window");
+      } catch (err) {
+        console.warn("[face-api] fallback:", err.message);
+        setModelStatus("fallback");
+        startDetection(false);
+      }
     }
 
     // Security hooks
@@ -484,7 +489,7 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
 
     // Switch to running — camera re-attach effect fires automatically
     setPhase("running");
-  }, [startDetection, handleViolation]);
+  }, [cameraEnabled, startDetection, handleViolation]);
 
   // ── Global cleanup ─────────────────────────────────────────────────────────
   useEffect(() => () => {
@@ -493,238 +498,264 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
   }, [stopAll]);
 
+  // ── Display-only fullscreen indicator (the violation logic lives in handleStartExam) ──
+  const [isFullscreen, setIsFullscreen] = useState(() => !!document.fullscreenElement);
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
   // ── derived ────────────────────────────────────────────────────────────────
-  const answeredCount = Object.keys(answers).length;
-  const markedCount   = markedForReview.length;
-  const notVisited    = questions.length - answeredCount - markedCount;
-  const currentQ      = questions[currentQuestion];
-  const progress      = questions.length ? (answeredCount / questions.length) * 100 : 0;
-  const timeColor     =
-    timeRemaining < 300  ? { bg:"#fee2e2", text:"#dc2626", border:"#fca5a5" } :
-    timeRemaining < 600  ? { bg:"#fef3c7", text:"#d97706", border:"#fcd34d" } :
-                           { bg:"#d1fae5", text:"#059669", border:"#6ee7b7" };
+  const answeredCount   = Object.keys(answers).length;
+  const markedCount     = markedForReview.length;
+  const unansweredCount = questions.length - answeredCount;
+  const currentQ        = questions[currentQuestion];
+  const progress        = questions.length ? (answeredCount / questions.length) * 100 : 0;
+  const timeTone        = timeRemaining < 300 ? "danger" : timeRemaining < 600 ? "warning" : "normal";
+  const isMarked        = markedForReview.includes(currentQuestion);
+  const examTitle       = exam?.subject || exam?.title || "Exam";
+
+  const toggleMark = () =>
+    setMarkedForReview((prev) => prev.includes(currentQuestion) ? prev.filter((i) => i !== currentQuestion) : [...prev, currentQuestion]);
+
+  const selectOption = (i) => {
+    const next = { ...answers, [currentQuestion]: i };
+    setAnswers(next);
+    answersRef.current = next;
+  };
+
+  const leaveExam = () => onExamEnd(resultData);
+
+  // Single headline for the proctoring state (detail list is in the side panel)
+  const proctor = !cameraEnabled
+    ? { tone: "neutral", icon: VideoOff,      label: "Camera off for this exam" }
+    : !cameraActive
+    ? { tone: "danger",  icon: CameraOff,     label: "Camera unavailable" }
+    : multipleFaces
+    ? { tone: "danger",  icon: Users,         label: "Multiple faces" }
+    : !faceDetected
+    ? { tone: "danger",  icon: UserX,         label: "Face not detected" }
+    : lookingAway
+    ? { tone: "warning", icon: AlertTriangle, label: "Look at the screen" }
+    : !eyesOpen
+    ? { tone: "warning", icon: EyeOff,        label: "Eyes appear closed" }
+    : { tone: "success", icon: ShieldCheck,   label: "Proctoring active" };
 
   // ══════════════════════════════════════════════════════════════════════════
   // SCREEN: loading / fetching
   if (phase === "loading" || phase === "fetching") {
     return (
-      <>
-        <FontLink />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-        <div style={S.fullDark}>
-          <div style={{ textAlign:"center" }}>
-            <div style={S.spinner} />
-            <p style={{ color:"#e2e8f0", fontFamily:"'DM Sans',sans-serif", fontSize:15, margin:0 }}>{fetchStatus}</p>
-          </div>
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas p-6">
+        <div className="text-center" role="status">
+          <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-brand-600" aria-hidden="true" />
+          <p className="text-sm font-medium text-slate-700">{fetchStatus}</p>
         </div>
-      </>
+      </div>
     );
   }
 
   // SCREEN: error
   if (phase === "error") {
     return (
-      <>
-        <FontLink />
-        <div style={S.fullDark}>
-          <div style={{ textAlign:"center", maxWidth:400 }}>
-            <AlertTriangle size={56} color="#ef4444" style={{ marginBottom:16 }} />
-            <h2 style={{ color:"#f1f5f9", fontFamily:"'DM Sans',sans-serif", fontSize:20, fontWeight:700, margin:"0 0 8px" }}>Failed to Load Exam</h2>
-            <p style={{ color:"#94a3b8", fontFamily:"'DM Sans',sans-serif", fontSize:14, margin:"0 0 24px" }}>{loadError}</p>
-            <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
-              <button onClick={() => navigate("/student/dashboard")} style={S.btnDark}>Go Back</button>
-              <button onClick={() => window.location.reload()} style={S.btnPrimary}>Retry</button>
-            </div>
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas p-6">
+        <div className="card w-full max-w-md p-8 text-center" role="alert">
+          <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+            <AlertTriangle className="h-6 w-6" />
+          </span>
+          <h2 className="text-lg font-bold text-slate-900">Couldn't load the exam</h2>
+          <p className="mt-1 text-sm text-slate-500">{loadError}</p>
+          <div className="mt-6 flex justify-center gap-2">
+            <Button variant="secondary" icon={Home} onClick={() => onExamEnd()}>Back to dashboard</Button>
+            <Button icon={RefreshCw} onClick={() => window.location.reload()}>Retry</Button>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // SCREEN: preflight
   if (phase === "preflight") {
+    const camFailed = camStatus === "denied" || camStatus === "error";
     return (
-      <>
-        <FontLink />
-        <style>{`
-          @keyframes spin    { to { transform:rotate(360deg) } }
-          @keyframes fadeUp  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-          @keyframes pulseDot{ 0%,100%{opacity:1} 50%{opacity:.4} }
-        `}</style>
-        <div style={S.fullDark}>
-          <div style={{ animation:"fadeUp .45s ease", textAlign:"center", maxWidth:480, width:"100%", padding:"0 20px" }}>
+      <div className="fixed inset-0 z-[60] overflow-y-auto bg-canvas">
+        <div className="mx-auto flex min-h-full max-w-5xl flex-col justify-center px-4 py-8 sm:px-6">
+          <div className="mb-6 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-white">
+              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-brand-700">System check</p>
+              <h1 className="truncate text-xl font-bold text-slate-900">{examTitle}</h1>
+            </div>
+          </div>
 
-            {/* Camera preview — videoRef lives here so stream attaches on click */}
-            <div style={{ borderRadius:16, overflow:"hidden", background:"#1e293b", position:"relative", aspectRatio:"4/3", marginBottom:28, border:"2px solid #334155" }}>
-              <video ref={videoRef} autoPlay playsInline muted style={{ width:"100%", height:"100%", objectFit:"cover", transform:"scaleX(-1)", display:"block" }} />
-              <canvas ref={canvasRef} style={{ position:"absolute", inset:0, width:"100%", height:"100%", pointerEvents:"none", transform:"scaleX(-1)" }} />
-              {!cameraActive && (
-                <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, background:"rgba(15,23,42,.92)" }}>
-                  {camStatus === "requesting" ? (
-                    <><div style={{ ...S.spinner, width:36, height:36, borderWidth:3, margin:0 }} /><span style={{ color:"#94a3b8", fontSize:13, fontFamily:"'DM Sans',sans-serif" }}>Requesting camera...</span></>
-                  ) : camStatus === "denied" || camStatus === "error" ? (
-                    <><WifiOff size={32} color="#ef4444" /><span style={{ color:"#fca5a5", fontSize:12, fontFamily:"'DM Sans',sans-serif", padding:"0 20px", lineHeight:1.5, textAlign:"center" }}>{cameraError}</span></>
-                  ) : (
-                    <><Camera size={32} color="#475569" /><span style={{ color:"#64748b", fontSize:13, fontFamily:"'DM Sans',sans-serif" }}>Camera preview will appear here</span></>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+            {/* Camera preview — videoRef lives here so the stream attaches on click */}
+            <div className="lg:col-span-3">
+              {cameraEnabled ? (
+                <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-900 shadow-card">
+                  <video ref={videoRef} autoPlay playsInline muted className="h-full w-full -scale-x-100 object-cover" />
+                  <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100" />
+                  {!cameraActive && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-900/90 px-6 text-center">
+                      {camStatus === "requesting" ? (
+                        <><Loader2 className="h-8 w-8 animate-spin text-brand-300" /><span className="text-sm text-slate-300">Requesting camera…</span></>
+                      ) : camFailed ? (
+                        <><CameraOff className="h-8 w-8 text-rose-300" /><span className="text-sm text-rose-200">{cameraError}</span></>
+                      ) : (
+                        <><Camera className="h-8 w-8 text-slate-400" /><span className="text-sm text-slate-300">Your camera preview will appear here</span></>
+                      )}
+                    </div>
+                  )}
+                  {cameraActive && (
+                    <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-xs font-semibold text-white">
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" /> LIVE
+                    </span>
                   )}
                 </div>
-              )}
-              {cameraActive && (
-                <div style={{ position:"absolute", top:10, left:10, display:"flex", alignItems:"center", gap:5 }}>
-                  <span style={{ width:7, height:7, borderRadius:"50%", background:"#ef4444", animation:"pulseDot 1.5s ease infinite", display:"block" }} />
-                  <span style={{ color:"#fff", fontSize:11, fontWeight:700, fontFamily:"'DM Sans',sans-serif" }}>LIVE</span>
+              ) : (
+                <div className="card flex aspect-[4/3] flex-col items-center justify-center gap-3 p-6 text-center">
+                  <VideoOff className="h-9 w-9 text-slate-400" aria-hidden="true" />
+                  <p className="text-sm font-medium text-slate-700">Camera proctoring is disabled for this exam</p>
+                  <p className="max-w-xs text-xs text-slate-500">Fullscreen, tab-switch and keyboard monitoring still apply.</p>
                 </div>
               )}
             </div>
 
-            {/* Info */}
-            <div style={{ marginBottom:20 }}>
-              <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"linear-gradient(135deg,#1d4ed8,#3b82f6)", borderRadius:12, padding:"8px 18px", marginBottom:14 }}>
-                <Shield size={18} color="#fff" />
-                <span style={{ color:"#fff", fontWeight:700, fontSize:15, fontFamily:"'DM Sans',sans-serif" }}>{exam?.subject || exam?.title || "Exam"}</span>
+            {/* Summary + start */}
+            <div className="card flex flex-col p-5 lg:col-span-2">
+              <h2 className="text-lg font-bold text-slate-900">Ready to begin?</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {questions.length} questions · {exam?.duration || 60} minutes ·{" "}
+                {cameraEnabled ? "the camera starts when you click Start." : "fullscreen starts when you click Start."}
+              </p>
+
+              <ul className="mt-5 space-y-2.5 text-sm text-slate-700">
+                {[
+                  cameraEnabled && "Sit in a well-lit place with your face clearly visible",
+                  cameraEnabled && "No one else should appear in the camera frame",
+                  "Don't switch tabs or leave fullscreen",
+                  cameraEnabled && "Keep your eyes open and face the screen",
+                  `The exam submits automatically after ${MAX_WARNINGS} warnings`,
+                ].filter(Boolean).map((rule) => (
+                  <li key={rule} className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />{rule}
+                  </li>
+                ))}
+              </ul>
+
+              {camFailed && (
+                <p className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                  Camera access failed. You can retry, or continue without camera proctoring.
+                </p>
+              )}
+
+              <div className="mt-auto space-y-2 pt-6">
+                <Button
+                  size="lg"
+                  fullWidth
+                  icon={Play}
+                  onClick={handleStartExam}
+                  loading={camStatus === "requesting"}
+                >
+                  {camStatus === "requesting" ? "Preparing…" : "Start exam"}
+                </Button>
+                {camFailed && (
+                  <Button variant="secondary" fullWidth onClick={handleStartExam}>Continue without camera</Button>
+                )}
               </div>
-              <h2 style={{ color:"#f1f5f9", fontFamily:"'DM Sans',sans-serif", fontSize:22, fontWeight:700, margin:"0 0 6px" }}>Ready to begin?</h2>
-              <p style={{ color:"#94a3b8", fontFamily:"'DM Sans',sans-serif", fontSize:14, margin:"0 0 4px" }}>{questions.length} questions &nbsp;·&nbsp; {exam?.duration || 60} minutes</p>
-              <p style={{ color:"#64748b", fontFamily:"'DM Sans',sans-serif", fontSize:12, margin:0 }}>Camera activates when you click Start.</p>
             </div>
-
-            {/* Rules */}
-            <div style={{ background:"#1e293b", borderRadius:14, border:"1px solid #334155", padding:"14px 18px", marginBottom:20, textAlign:"left" }}>
-              {[
-                "Sit in a well-lit area with your face clearly visible",
-                "No other person should appear in the camera frame",
-                "Do not switch tabs or exit fullscreen during the exam",
-                "Keep your eyes open and face the camera at all times",
-                `Exam auto-submits after ${MAX_WARNINGS} warnings`,
-              ].map((rule, i) => (
-                <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"5px 0" }}>
-                  <CheckCircle size={13} color="#10b981" style={{ marginTop:2, flexShrink:0 }} />
-                  <span style={{ fontSize:12, color:"#94a3b8", fontFamily:"'DM Sans',sans-serif" }}>{rule}</span>
-                </div>
-              ))}
-            </div>
-
-            {(camStatus === "denied" || camStatus === "error") && (
-              <div style={{ background:"#450a0a", border:"1px solid #7f1d1d", borderRadius:12, padding:"10px 14px", marginBottom:14, textAlign:"left" }}>
-                <p style={{ margin:0, fontSize:12, color:"#fca5a5", fontFamily:"'DM Sans',sans-serif" }}>Camera access failed. You may still take the exam without proctoring.</p>
-              </div>
-            )}
-
-            <button
-              onClick={handleStartExam}
-              disabled={camStatus === "requesting"}
-              style={{ width:"100%", padding:14, borderRadius:14, border:"none", cursor:camStatus==="requesting"?"wait":"pointer", background:camStatus==="requesting"?"#1e3a5f":"linear-gradient(135deg,#1d4ed8,#3b82f6)", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontSize:16, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 8px 24px rgba(29,78,216,.35)" }}
-            >
-              {camStatus === "requesting"
-                ? <><div style={{ ...S.spinner, width:20, height:20, borderWidth:2, margin:0 }} /> Preparing...</>
-                : <><Play size={18} /> Start Exam</>}
-            </button>
-
-            {(camStatus === "denied" || camStatus === "error") && (
-              <button onClick={handleStartExam} style={{ marginTop:10, width:"100%", padding:11, borderRadius:12, border:"1px solid #334155", background:"transparent", color:"#94a3b8", fontFamily:"'DM Sans',sans-serif", fontSize:14, cursor:"pointer" }}>
-                Continue without camera
-              </button>
-            )}
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // SCREEN: result (data from server)
   if (phase === "result" && resultData) {
-    const pct   = parseFloat(resultData.percentage) || 0;
-    const grade = pct >= 70
-      ? { label:"Passed",     emoji:"🎉", grad:"linear-gradient(135deg,#059669,#0d9488)", light:"#d1fae5", border:"#6ee7b7", text:"#065f46" }
-      : pct >= 40
-      ? { label:"Average",    emoji:"📊", grad:"linear-gradient(135deg,#d97706,#ea580c)", light:"#fef3c7", border:"#fcd34d", text:"#92400e" }
-      : { label:"Needs Work", emoji:"📚", grad:"linear-gradient(135deg,#dc2626,#be123c)", light:"#fee2e2", border:"#fca5a5", text:"#991b1b" };
+    const pct  = parseFloat(resultData.percentage) || 0;
+    const pass = pct >= 40;
+    const r = 52;
+    const circ = 2 * Math.PI * r;
+    const ringColor = pct >= 70 ? "#059669" : pass ? "#d97706" : "#e11d48";
 
     return (
-      <>
-        <FontLink />
-        <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}`}</style>
-        <div style={{ ...S.fullDark, background:"rgba(0,0,0,.75)", backdropFilter:"blur(6px)" }}>
-          <div style={{ animation:"fadeUp .4s ease", background:"#fff", borderRadius:24, width:"100%", maxWidth:520, maxHeight:"92vh", overflowY:"auto", boxShadow:"0 32px 80px rgba(0,0,0,.4)", padding:0 }}>
-
-            {/* Header */}
-            <div style={{ background:grade.grad, padding:"28px 28px 24px", borderRadius:"24px 24px 0 0", color:"#fff" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div>
-                  <p style={{ margin:0, fontSize:11, opacity:.75, fontFamily:"'DM Sans',sans-serif", letterSpacing:1, textTransform:"uppercase" }}>{resultData.subject}</p>
-                  <h2 style={{ margin:"4px 0 0", fontSize:22, fontWeight:700, fontFamily:"'DM Sans',sans-serif" }}>Exam Complete {grade.emoji}</h2>
-                  {resultData.isAuto && (
-                    <p style={{ margin:"6px 0 0", fontSize:12, opacity:.85, fontFamily:"'DM Sans',sans-serif", background:"rgba(0,0,0,.2)", display:"inline-block", padding:"2px 10px", borderRadius:20 }}>
-                      Auto-submitted · {resultData.terminationReason}
-                    </p>
-                  )}
-                </div>
-                <Award size={40} style={{ opacity:.8 }} />
-              </div>
+      <div className="fixed inset-0 z-[60] overflow-y-auto bg-canvas">
+        <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-4 py-10">
+          <div className="card animate-scale-in overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-5 text-center">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{resultData.subject}</p>
+              <h1 className="mt-1 text-xl font-bold text-slate-900">Exam submitted</h1>
+              {resultData.isAuto && (
+                <p className="mx-auto mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Auto-submitted · {resultData.terminationReason}
+                </p>
+              )}
             </div>
 
-            <div style={{ padding:28 }}>
-              {/* Score circle */}
-              <div style={{ textAlign:"center", marginBottom:28 }}>
-                <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", justifyContent:"center", width:130, height:130, borderRadius:"50%", border:`5px solid ${grade.border}`, background:grade.light, marginBottom:10 }}>
-                  <span style={{ fontSize:32, fontWeight:900, color:grade.text, fontFamily:"'DM Mono',monospace", lineHeight:1 }}>{pct}%</span>
-                  <span style={{ fontSize:12, fontWeight:700, color:grade.text, fontFamily:"'DM Sans',sans-serif", marginTop:3 }}>{grade.label}</span>
+            <div className="px-6 py-8">
+              <div className="flex flex-col items-center">
+                <div className="relative h-36 w-36">
+                  <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120" aria-hidden="true">
+                    <circle cx="60" cy="60" r={r} fill="none" stroke="#e2e8f0" strokeWidth="10" />
+                    <circle cx="60" cy="60" r={r} fill="none" stroke={ringColor} strokeWidth="10" strokeLinecap="round"
+                      strokeDasharray={`${(Math.min(pct, 100) / 100) * circ} ${circ}`} />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="font-mono text-2xl font-bold tabular text-slate-900">{pct}%</span>
+                  </div>
                 </div>
-                <p style={{ margin:0, fontSize:17, fontWeight:700, color:"#111827", fontFamily:"'DM Sans',sans-serif" }}>
-                  {resultData.score} / {resultData.totalMarks} marks
-                </p>
+                <p className="mt-4 text-lg font-bold tabular text-slate-900">{resultData.score} / {resultData.totalMarks} marks</p>
+                <div className="mt-2">
+                  <Badge tone={pass ? "success" : "danger"} icon={pass ? CheckCircle2 : XCircle}>
+                    {pass ? "Passed" : "Below pass mark (40%)"}
+                  </Badge>
+                </div>
               </div>
 
-              {/* Stats */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
+              <dl className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
-                  { label:"Correct",    val:resultData.correctCount,    Icon:CheckCircle, bg:"#d1fae5", border:"#6ee7b7", tc:"#065f46", ic:"#059669" },
-                  { label:"Wrong",      val:resultData.wrongCount,      Icon:XCircle,     bg:"#fee2e2", border:"#fca5a5", tc:"#991b1b", ic:"#dc2626" },
-                  { label:"Unanswered", val:resultData.unansweredCount, Icon:AlertCircle, bg:"#f3f4f6", border:"#e5e7eb", tc:"#374151", ic:"#6b7280" },
-                  { label:"Time Taken", val:fmtTaken(resultData.timeTaken), Icon:Clock,   bg:"#dbeafe", border:"#93c5fd", tc:"#1e3a8a", ic:"#3b82f6" },
-                ].map(({ label, val, Icon, bg, border, tc, ic }) => (
-                  <div key={label} style={{ background:bg, border:`1px solid ${border}`, borderRadius:14, padding:"14px 16px" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
-                      <Icon size={14} color={ic} />
-                      <span style={{ fontSize:11, fontWeight:700, color:ic, fontFamily:"'DM Sans',sans-serif", textTransform:"uppercase", letterSpacing:.5 }}>{label}</span>
-                    </div>
-                    <p style={{ margin:0, fontSize:28, fontWeight:900, color:tc, fontFamily:"'DM Mono',monospace" }}>{val}</p>
+                  { label: "Correct",    val: resultData.correctCount,         Icon: CheckCircle2, ic: "text-emerald-600" },
+                  { label: "Wrong",      val: resultData.wrongCount,           Icon: XCircle,      ic: "text-rose-600" },
+                  { label: "Unanswered", val: resultData.unansweredCount,      Icon: AlertCircle,  ic: "text-slate-400" },
+                  { label: "Time taken", val: fmtTaken(resultData.timeTaken),  Icon: Timer,        ic: "text-brand-600" },
+                ].map(({ label, val, Icon, ic }) => (
+                  <div key={label} className="rounded-lg border border-slate-200 px-3 py-3">
+                    <dt className="flex items-center gap-1.5 text-xs text-slate-500"><Icon className={cn("h-3.5 w-3.5", ic)} aria-hidden="true" />{label}</dt>
+                    <dd className="mt-1 font-mono text-xl font-bold tabular text-slate-900">{val}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
 
-              {/* Violations */}
               {violationHistory.length > 0 && (
-                <div style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:12, padding:"14px 16px", marginBottom:20 }}>
-                  <p style={{ margin:"0 0 8px", fontSize:12, fontWeight:700, color:"#991b1b", fontFamily:"'DM Sans',sans-serif", textTransform:"uppercase" }}>
-                    Proctoring Violations ({resultData.violations}/{MAX_WARNINGS})
-                  </p>
-                  {violationHistory.map((v, i) => (
-                    <p key={i} style={{ margin:"3px 0", fontSize:12, color:"#b91c1c", fontFamily:"'DM Sans',sans-serif" }}>• {v.reason}</p>
-                  ))}
+                <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-900">Proctoring warnings ({resultData.violations}/{MAX_WARNINGS})</p>
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-amber-900">
+                    {violationHistory.map((v, i) => <li key={i}>• {v.reason}</li>)}
+                  </ul>
                 </div>
               )}
+            </div>
 
-              {/* Actions */}
-              <div style={{ display:"flex", gap:10 }}>
-                <button
-                  onClick={() => {
-                    const txt = `EXAM RESULT\n${resultData.subject}\n${resultData.submittedAt}\n\nScore: ${resultData.score}/${resultData.totalMarks} (${pct}%)\nCorrect: ${resultData.correctCount} | Wrong: ${resultData.wrongCount} | Unanswered: ${resultData.unansweredCount}\nViolations: ${resultData.violations}/${MAX_WARNINGS}`;
-                    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt])); a.download = `result-${Date.now()}.txt`; a.click();
-                  }}
-                  style={{ ...S.btnSecondary, flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-                ><Download size={15} /> Download</button>
-                <button
-                  onClick={() => navigate("/student/dashboard")}
-                  style={{ ...S.btnPrimary, flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-                ><Home size={15} /> Dashboard</button>
-              </div>
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4 sm:flex-row sm:justify-end">
+              <Button
+                variant="secondary"
+                icon={Download}
+                onClick={() => {
+                  const txt = `EXAM RESULT\n${resultData.subject}\n${resultData.submittedAt}\n\nScore: ${resultData.score}/${resultData.totalMarks} (${pct}%)\nCorrect: ${resultData.correctCount} | Wrong: ${resultData.wrongCount} | Unanswered: ${resultData.unansweredCount}\nViolations: ${resultData.violations}/${MAX_WARNINGS}`;
+                  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt])); a.download = `result-${Date.now()}.txt`; a.click();
+                }}
+              >
+                Download summary
+              </Button>
+              <Button icon={Home} onClick={leaveExam}>Back to dashboard</Button>
             </div>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -733,337 +764,390 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
   // ══════════════════════════════════════════════════════════════════════════
   // SCREEN: running exam
 
-  const SubmitModal = () => (
-    <div style={S.overlay}>
-      <div style={S.modal}>
-        <div style={{ textAlign:"center", marginBottom:24 }}>
-          <div style={{ width:56, height:56, borderRadius:"50%", background:"#fef3c7", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 12px" }}>
-            <AlertTriangle size={26} color="#f59e0b" />
-          </div>
-          <h3 style={{ margin:0, fontSize:18, fontWeight:700, color:"#111827", fontFamily:"'DM Sans',sans-serif" }}>Submit Exam?</h3>
-          <p style={{ margin:"6px 0 0", fontSize:13, color:"#6b7280", fontFamily:"'DM Sans',sans-serif" }}>
-            {questions.length - answeredCount} question{questions.length - answeredCount !== 1 ? "s" : ""} unanswered
-          </p>
-        </div>
-        <div style={{ background:"#f9fafb", borderRadius:12, padding:"14px 16px", marginBottom:20 }}>
-          {[
-            { label:"Answered",          val:answeredCount,                    color:"#059669" },
-            { label:"Marked for review", val:markedCount,                      color:"#d97706" },
-            { label:"Unanswered",        val:questions.length - answeredCount, color:"#ef4444" },
-          ].map(({ label, val, color }) => (
-            <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid #f3f4f6" }}>
-              <span style={{ fontSize:13, color:"#6b7280", fontFamily:"'DM Sans',sans-serif" }}>{label}</span>
-              <span style={{ fontSize:13, fontWeight:700, color, fontFamily:"'DM Mono',monospace" }}>{val}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button onClick={() => setShowSubmitConfirm(false)} disabled={submitting} style={{ ...S.btnSecondary, flex:1 }}>Cancel</button>
-          <button
-            onClick={() => { setShowSubmitConfirm(false); submitExam(false); }}
-            disabled={submitting}
-            style={{ ...S.btnPrimary, flex:1, background:"#059669", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-          >
-            {submitting
-              ? <><RefreshCw size={15} style={{ animation:"spin .8s linear infinite" }} /> Submitting...</>
-              : "Submit Exam"}
-          </button>
-        </div>
+  const timerCls = {
+    normal:  "border-slate-200 bg-white text-slate-900",
+    warning: "border-amber-300 bg-amber-50 text-amber-900",
+    danger:  "border-rose-300 bg-rose-50 text-rose-700",
+  }[timeTone];
+
+  const proctorCls = {
+    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    warning: "border-amber-200 bg-amber-50 text-amber-900",
+    danger:  "border-rose-200 bg-rose-50 text-rose-700",
+    neutral: "border-slate-200 bg-slate-50 text-slate-600",
+  }[proctor.tone];
+  const ProctorIcon = proctor.icon;
+
+  const questionGrid = (
+    <>
+      <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 lg:grid-cols-5">
+        {questions.map((_, i) => {
+          const isCurrent = i === currentQuestion;
+          const answered = answers[i] !== undefined;
+          const marked = markedForReview.includes(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => { setCurrentQuestion(i); setShowPalette(false); }}
+              aria-label={`Question ${i + 1}${answered ? ", answered" : ", not answered"}${marked ? ", marked for review" : ""}`}
+              aria-current={isCurrent ? "step" : undefined}
+              className={cn(
+                "relative h-9 rounded-md text-xs font-semibold tabular transition-colors",
+                answered ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                  : marked ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
+                  : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                isCurrent && "ring-2 ring-brand-600 ring-offset-2"
+              )}
+            >
+              {i + 1}
+              {marked && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500" aria-hidden="true" />}
+            </button>
+          );
+        })}
       </div>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-600">
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-600" />Answered</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-amber-100 ring-1 ring-amber-300" />Marked</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border border-slate-300 bg-white" />Not answered</span>
+      </div>
+    </>
+  );
+
+  const counts = (
+    <div className="grid grid-cols-3 gap-2 text-center">
+      {[
+        { val: answeredCount,   label: "Answered" },
+        { val: markedCount,     label: "Marked" },
+        { val: unansweredCount, label: "Left" },
+      ].map(({ val, label }) => (
+        <div key={label} className="rounded-lg border border-slate-200 bg-white py-2">
+          <p className="font-mono text-lg font-bold tabular text-slate-900">{val}</p>
+          <p className="text-[11px] text-slate-500">{label}</p>
+        </div>
+      ))}
     </div>
   );
 
+  const statusRows = [
+    { label: "Camera",      ok: cameraActive,   okText: "Active",   failText: "Off",       OkIcon: Video,        FailIcon: VideoOff },
+    { label: "Face",        ok: faceDetected,   okText: "Detected", failText: "Not found", OkIcon: UserCheck,    FailIcon: UserX },
+    { label: "People",      ok: !multipleFaces, okText: "Only you", failText: "Multiple",  OkIcon: UserCheck,    FailIcon: Users },
+    { label: "Attention",   ok: !lookingAway,   okText: "Focused",  failText: "Away",      OkIcon: Eye,          FailIcon: AlertTriangle },
+    { label: "Eyes",        ok: eyesOpen,       okText: "Open",     failText: "Closed",    OkIcon: Eye,          FailIcon: EyeOff },
+  ];
+
   return (
-    <>
-      <FontLink />
-      <style>{`
-        *{box-sizing:border-box} body{margin:0}
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}
-        .opt-card:hover{border-color:#3b82f6!important;background:#eff6ff!important}
-        .nav-btn:hover{opacity:.85}
-        @keyframes slideDown{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.4}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-      `}</style>
+    <div className="fixed inset-0 z-[60] flex select-none flex-col bg-canvas">
 
-      <div style={{ position:"fixed", inset:0, background:"#f1f5f9", display:"flex", zIndex:50, userSelect:"none" }}>
-
-        {/* Warning toast */}
-        {showWarning && (
-          <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:9999, animation:"slideDown .3s ease" }}>
-            <div style={{ background:"#dc2626", color:"#fff", padding:"12px 20px", borderRadius:12, boxShadow:"0 8px 32px rgba(220,38,38,.4)", display:"flex", alignItems:"center", gap:10, fontFamily:"'DM Sans',sans-serif", fontSize:14, fontWeight:500 }}>
-              <AlertTriangle size={18} /> {warningMessage}
-            </div>
-          </div>
-        )}
-
-        {showSubmitConfirm && <SubmitModal />}
-
-        {/* ── LEFT — question panel ── */}
-        <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0, background:"#f8fafc" }}>
-
-          {/* Top bar */}
-          <div style={{ background:"#fff", borderBottom:"1px solid #e2e8f0", padding:"12px 24px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <div style={{ width:36, height:36, background:"linear-gradient(135deg,#1d4ed8,#3b82f6)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <Shield size={18} color="#fff" />
-              </div>
-              <div>
-                <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#111827", fontFamily:"'DM Sans',sans-serif" }}>{exam?.subject || exam?.title || "Exam"}</p>
-                <p style={{ margin:0, fontSize:11, color:"#9ca3af", fontFamily:"'DM Sans',sans-serif" }}>Question {currentQuestion + 1} of {questions.length}</p>
-              </div>
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-              {/* Timer */}
-              <div style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:10, background:timeColor.bg, border:`1px solid ${timeColor.border}` }}>
-                {timeRemaining < 300 ? <Zap size={15} color={timeColor.text} /> : <Clock size={15} color={timeColor.text} />}
-                <span style={{ fontFamily:"'DM Mono',monospace", fontWeight:700, fontSize:15, color:timeColor.text }}>{fmt(timeRemaining)}</span>
-              </div>
-              {/* Cam dot + warning pips */}
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <div style={{ width:8, height:8, borderRadius:"50%", background:cameraActive?"#10b981":"#ef4444", animation:cameraActive?"pulseDot 2s ease infinite":"none" }} />
-                <div style={{ display:"flex", gap:4 }}>
-                  {Array.from({ length:MAX_WARNINGS }).map((_, i) => (
-                    <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:i < warnings ? "#ef4444" : "#e5e7eb", transition:"background .3s" }} />
-                  ))}
-                </div>
-                <span style={{ fontSize:12, fontWeight:700, color:warnings >= MAX_WARNINGS - 1 ? "#dc2626" : "#9ca3af", fontFamily:"'DM Mono',monospace" }}>{warnings}/{MAX_WARNINGS}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Question body */}
-          <div style={{ flex:1, overflowY:"auto", padding:24 }}>
-            <div style={{ maxWidth:680, margin:"0 auto" }}>
-              <div style={{ background:"#fff", borderRadius:16, border:"1px solid #e2e8f0", boxShadow:"0 2px 8px rgba(0,0,0,.04)", padding:28 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ background:"linear-gradient(135deg,#1d4ed8,#3b82f6)", color:"#fff", fontSize:12, fontWeight:700, padding:"4px 12px", borderRadius:8, fontFamily:"'DM Sans',sans-serif" }}>Q{currentQuestion + 1}</span>
-                    <span style={{ fontSize:12, color:"#9ca3af", fontFamily:"'DM Sans',sans-serif" }}>{currentQ?.marks || 2} marks</span>
-                  </div>
-                  <button
-                    onClick={() => setMarkedForReview((prev) => prev.includes(currentQuestion) ? prev.filter((i) => i !== currentQuestion) : [...prev, currentQuestion])}
-                    style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", background:markedForReview.includes(currentQuestion)?"#fef3c7":"#f3f4f6", color:markedForReview.includes(currentQuestion)?"#b45309":"#6b7280" }}
-                  >
-                    <Flag size={13} /> {markedForReview.includes(currentQuestion) ? "Marked" : "Mark for Review"}
-                  </button>
-                </div>
-
-                <h3 style={{ margin:"0 0 24px", fontSize:16, fontWeight:600, color:"#111827", lineHeight:1.6, fontFamily:"'DM Sans',sans-serif" }}>
-                  {currentQ?.text || currentQ?.question}
-                </h3>
-
-                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                  {(currentQ?.options || []).map((opt, i) => {
-                    const sel = answers[currentQuestion] === i;
-                    return (
-                      <div key={i} className="opt-card"
-                        onClick={() => {
-                          const next = { ...answers, [currentQuestion]: i };
-                          setAnswers(next);
-                          answersRef.current = next;
-                        }}
-                        style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", border:`2px solid ${sel?"#3b82f6":"#e5e7eb"}`, borderRadius:12, cursor:"pointer", transition:"all .15s ease", background:sel?"#eff6ff":"#fff", boxShadow:sel?"0 0 0 3px rgba(59,130,246,.1)":"none" }}
-                      >
-                        <div style={{ width:20, height:20, borderRadius:"50%", border:`2px solid ${sel?"#3b82f6":"#d1d5db"}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                          {sel && <div style={{ width:10, height:10, borderRadius:"50%", background:"#3b82f6" }} />}
-                        </div>
-                        <span style={{ fontSize:14, fontFamily:"'DM Sans',sans-serif", color:sel?"#1e40af":"#374151", fontWeight:sel?500:400, flex:1 }}>{opt}</span>
-                        {sel && <span style={{ fontSize:11, background:"#dbeafe", color:"#1e40af", padding:"2px 8px", borderRadius:20, fontWeight:600, fontFamily:"'DM Sans',sans-serif" }}>Selected</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:28, paddingTop:20, borderTop:"1px solid #f3f4f6" }}>
-                  <button onClick={() => setCurrentQuestion((p) => p - 1)} disabled={currentQuestion === 0}
-                    style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 18px", border:"1px solid #e5e7eb", borderRadius:10, background:"#fff", cursor:currentQuestion===0?"not-allowed":"pointer", opacity:currentQuestion===0?.4:1, fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:500, color:"#374151" }}>
-                    <ChevronLeft size={15} /> Previous
-                  </button>
-                  <span style={{ fontSize:12, color:"#9ca3af", fontFamily:"'DM Mono',monospace" }}>{currentQuestion + 1} / {questions.length}</span>
-                  <button onClick={() => setCurrentQuestion((p) => p + 1)} disabled={currentQuestion === questions.length - 1}
-                    style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 18px", border:"1px solid #e5e7eb", borderRadius:10, background:"#fff", cursor:currentQuestion===questions.length-1?"not-allowed":"pointer", opacity:currentQuestion===questions.length-1?.4:1, fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:500, color:"#374151" }}>
-                    Next <ChevronRight size={15} />
-                  </button>
-                </div>
-              </div>
-            </div>
+      {/* Warning toast */}
+      {showWarning && (
+        <div className="fixed left-1/2 top-4 z-[65] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 animate-slide-down" role="alert">
+          <div className="flex items-start gap-3 rounded-lg border border-rose-300 bg-white px-4 py-3 shadow-pop">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+              <AlertTriangle className="h-4 w-4" />
+            </span>
+            <p className="text-sm font-medium text-slate-900">{warningMessage}</p>
           </div>
         </div>
+      )}
 
-        {/* ── RIGHT sidebar — videoRef re-attached here via useEffect ── */}
-        <div style={{ width:288, background:"#fff", borderLeft:"1px solid #e2e8f0", display:"flex", flexDirection:"column", overflowY:"auto" }}>
-          <div style={{ padding:16, flex:1 }}>
+      {/* ── Header ── */}
+      <header className="relative z-10 flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-5">
+        <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white sm:flex">
+          <ShieldCheck className="h-[18px] w-[18px]" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-slate-900">{examTitle}</p>
+          <p className="text-xs text-slate-500">Question {currentQuestion + 1} of {questions.length} · {answeredCount} answered</p>
+        </div>
 
-            {/* Camera */}
-            <div style={{ borderRadius:14, overflow:"hidden", background:"#0f172a", position:"relative", aspectRatio:"4/3", marginBottom:14 }}>
-              <video ref={videoRef} autoPlay playsInline muted style={{ width:"100%", height:"100%", objectFit:"cover", transform:"scaleX(-1)", display:"block" }} />
-              <canvas ref={canvasRef} style={{ position:"absolute", inset:0, width:"100%", height:"100%", pointerEvents:"none", transform:"scaleX(-1)" }} />
-              <div style={{ position:"absolute", top:8, left:8, display:"flex", alignItems:"center", gap:5 }}>
-                <span style={{ width:7, height:7, borderRadius:"50%", background:cameraActive?"#ef4444":"#64748b", animation:cameraActive?"pulseDot 1.5s ease infinite":"none", display:"block" }} />
-                <span style={{ color:"#fff", fontSize:11, fontWeight:700, fontFamily:"'DM Sans',sans-serif", textShadow:"0 1px 3px rgba(0,0,0,.5)" }}>LIVE</span>
-              </div>
-              {!cameraActive && (
-                <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"rgba(15,23,42,.85)", gap:6 }}>
-                  <WifiOff size={22} color="#94a3b8" />
-                  <span style={{ color:"#94a3b8", fontSize:11, fontFamily:"'DM Sans',sans-serif", textAlign:"center", padding:"0 12px", lineHeight:1.4 }}>{cameraError || "Camera unavailable"}</span>
+        <div className={cn("hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold md:flex", proctorCls)}>
+          <ProctorIcon className="h-3.5 w-3.5" aria-hidden="true" />{proctor.label}
+        </div>
+
+        <div className="hidden items-center gap-1 sm:flex" title={`${warnings} of ${MAX_WARNINGS} warnings`} aria-label={`${warnings} of ${MAX_WARNINGS} warnings used`}>
+          {Array.from({ length: MAX_WARNINGS }).map((_, i) => (
+            <span key={i} className={cn("h-2 w-2 rounded-full transition-colors", i < warnings ? "bg-rose-500" : "bg-slate-200")} />
+          ))}
+          <span className={cn("ml-1 font-mono text-xs font-bold", warnings >= MAX_WARNINGS - 1 ? "text-rose-600" : "text-slate-500")}>{warnings}/{MAX_WARNINGS}</span>
+        </div>
+
+        <div role="timer" aria-label="Time remaining" className={cn("flex items-center gap-1.5 rounded-lg border px-3 py-1.5", timerCls)}>
+          <Clock className="h-4 w-4" aria-hidden="true" />
+          <span className="font-mono text-sm font-bold tabular sm:text-base">{fmt(timeRemaining)}</span>
+        </div>
+
+        <Button
+          variant="success"
+          icon={Send}
+          onClick={() => setShowSubmitConfirm(true)}
+          disabled={submitting}
+          className="hidden sm:inline-flex"
+        >
+          Submit
+        </Button>
+      </header>
+
+      {/* Answer progress */}
+      <div className="h-1 w-full shrink-0 bg-slate-200" aria-hidden="true">
+        <div className="h-full bg-brand-500 transition-[width] duration-300" style={{ width: `${progress}%` }} />
+      </div>
+
+      {/* Mobile status strip */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 md:hidden">
+        <span className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold", proctorCls)}>
+          <ProctorIcon className="h-3.5 w-3.5" aria-hidden="true" />{proctor.label}
+        </span>
+        <span className={cn("ml-auto font-mono text-xs font-bold", warnings > 0 ? "text-rose-600" : "text-slate-500")}>
+          {warnings}/{MAX_WARNINGS} warnings
+        </span>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        {/* ── Question area ── */}
+        <main className="min-w-0 flex-1 overflow-y-auto px-3 py-5 pb-28 sm:px-6 lg:pb-8">
+          <div className="mx-auto max-w-3xl">
+            <article className="card p-5 sm:p-7" aria-labelledby="question-text">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-slate-900 px-2.5 py-1 font-mono text-xs font-bold text-white">Q{currentQuestion + 1}</span>
+                  <span className="text-xs font-medium text-slate-500">{marksPerQ} mark{marksPerQ > 1 ? "s" : ""}</span>
                 </div>
-              )}
-              <div style={{ position:"absolute", bottom:8, right:8 }}>
-                {modelStatus==="loading"                               && <span style={S.badge("#fbbf24")}>Loading AI...</span>}
-                {modelStatus==="ready"                                 && <span style={S.badge("#34d399")}>● AI Active</span>}
-                {(modelStatus==="fallback"||modelStatus==="error")     && <span style={S.badge("#fbbf24")}>Motion Mode</span>}
+                <button
+                  type="button"
+                  onClick={toggleMark}
+                  aria-pressed={isMarked}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors",
+                    isMarked ? "border-amber-300 bg-amber-50 text-amber-900" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  <Flag className={cn("h-3.5 w-3.5", isMarked && "fill-amber-500 text-amber-600")} aria-hidden="true" />
+                  {isMarked ? "Marked for review" : "Mark for review"}
+                </button>
               </div>
-            </div>
 
-            {/* Proctoring status */}
-            <div style={{ background:"#f8fafc", borderRadius:12, border:"1px solid #e2e8f0", padding:"12px 14px", marginBottom:14 }}>
-              <p style={{ margin:"0 0 10px", fontSize:10, fontWeight:700, color:"#94a3b8", fontFamily:"'DM Sans',sans-serif", textTransform:"uppercase", letterSpacing:.8, display:"flex", alignItems:"center", gap:5 }}>
-                <Video size={11} /> Proctoring Status
-              </p>
-              {[
-                { label:"Camera",        ok:cameraActive,   okText:"Active",   failText:"Off",       OkIcon:Wifi,         FailIcon:WifiOff     },
-                { label:"Face",          ok:faceDetected,   okText:"Detected", failText:"Not found", OkIcon:UserCheck,    FailIcon:UserX       },
-                { label:"Eyes",          ok:eyesOpen,       okText:"Open",     failText:"Closed",    OkIcon:Eye,          FailIcon:EyeOff      },
-                { label:"Single person", ok:!multipleFaces, okText:"Verified", failText:"Multiple!", OkIcon:UserCheck,    FailIcon:Users       },
-                { label:"Attention",     ok:!lookingAway,   okText:"Focused",  failText:"Away",      OkIcon:CheckCircle,  FailIcon:AlertCircle },
-              ].map(({ label, ok, okText, failText, OkIcon, FailIcon }) => (
-                <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:"1px solid #f1f5f9" }}>
-                  <span style={{ fontSize:12, color:"#64748b", fontFamily:"'DM Sans',sans-serif" }}>{label}</span>
-                  <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, fontWeight:700, fontFamily:"'DM Sans',sans-serif", color:ok?"#059669":"#dc2626" }}>
-                    {ok ? <OkIcon size={11} /> : <FailIcon size={11} />} {ok ? okText : failText}
-                  </span>
-                </div>
-              ))}
-            </div>
+              <h2 id="question-text" className="whitespace-pre-line text-base font-semibold leading-relaxed text-slate-900 sm:text-lg">
+                {currentQ?.text || currentQ?.question}
+              </h2>
 
-            {/* Warnings indicator */}
-            {warnings > 0 && (
-              <div style={{ borderRadius:12, padding:"11px 13px", marginBottom:14, background:warnings<=2?"#fef3c7":warnings<=3?"#fff7ed":"#fee2e2", border:`1px solid ${warnings<=2?"#fcd34d":warnings<=3?"#fb923c":"#fca5a5"}` }}>
-                <div style={{ display:"flex", gap:8 }}>
-                  <AlertTriangle size={14} color={warnings<=2?"#d97706":warnings<=3?"#ea580c":"#dc2626"} style={{ marginTop:1, flexShrink:0 }} />
-                  <div>
-                    <p style={{ margin:0, fontSize:12, fontWeight:700, fontFamily:"'DM Sans',sans-serif", color:warnings<=2?"#92400e":warnings<=3?"#9a3412":"#991b1b" }}>
-                      Warning {warnings} of {MAX_WARNINGS}
-                    </p>
-                    <p style={{ margin:"2px 0 0", fontSize:11, color:"#6b7280", fontFamily:"'DM Sans',sans-serif" }}>{MAX_WARNINGS - warnings} strike{MAX_WARNINGS - warnings !== 1 ? "s" : ""} remaining</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Navigator */}
-            <div style={{ marginBottom:14 }}>
-              <p style={{ margin:"0 0 8px", fontSize:10, fontWeight:700, color:"#94a3b8", fontFamily:"'DM Sans',sans-serif", textTransform:"uppercase", letterSpacing:.8 }}>Navigator</p>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:5, marginBottom:10 }}>
-                {questions.map((_, i) => {
-                  let bg="#f1f5f9", col="#64748b";
-                  if (i === currentQuestion)            { bg="#1d4ed8"; col="#fff"; }
-                  else if (markedForReview.includes(i)) { bg="#f59e0b"; col="#fff"; }
-                  else if (answers[i] !== undefined)    { bg="#10b981"; col="#fff"; }
+              <div role="radiogroup" aria-labelledby="question-text" className="mt-6 space-y-2.5">
+                {(currentQ?.options || []).map((opt, i) => {
+                  const sel = answers[currentQuestion] === i;
                   return (
-                    <button key={i} className="nav-btn" onClick={() => setCurrentQuestion(i)}
-                      style={{ background:bg, color:col, border:"none", borderRadius:8, padding:"7px 0", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'DM Mono',monospace", transition:"all .15s" }}>
-                      {i + 1}
+                    <button
+                      key={i}
+                      type="button"
+                      role="radio"
+                      aria-checked={sel}
+                      onClick={() => selectOption(i)}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-lg border-2 px-4 py-3.5 text-left transition-colors",
+                        sel ? "border-brand-600 bg-brand-50" : "border-slate-200 bg-white hover:border-brand-300 hover:bg-brand-50/40"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                          sel ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"
+                        )}
+                        aria-hidden="true"
+                      >
+                        {String.fromCharCode(65 + i)}
+                      </span>
+                      <span className={cn("flex-1 text-sm sm:text-[15px]", sel ? "font-medium text-slate-900" : "text-slate-700")}>{opt}</span>
+                      {sel && <CheckCircle2 className="h-5 w-5 shrink-0 text-brand-600" aria-hidden="true" />}
                     </button>
                   );
                 })}
               </div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:"5px 12px" }}>
-                {[["#10b981","Answered"],["#f59e0b","Marked"],["#1d4ed8","Current"],["#f1f5f9","Not visited"]].map(([bg,lbl]) => (
-                  <span key={lbl} style={{ display:"flex", alignItems:"center", gap:4, fontSize:10, color:"#94a3b8", fontFamily:"'DM Sans',sans-serif" }}>
-                    <span style={{ width:8, height:8, borderRadius:"50%", background:bg, display:"inline-block" }} /> {lbl}
-                  </span>
-                ))}
-              </div>
-            </div>
 
-            {/* Progress */}
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                <span style={{ fontSize:11, color:"#94a3b8", fontFamily:"'DM Sans',sans-serif" }}>Progress</span>
-                <span style={{ fontSize:11, fontWeight:700, color:"#475569", fontFamily:"'DM Mono',monospace" }}>{Math.round(progress)}%</span>
+              {/* Desktop prev / next */}
+              <div className="mt-8 hidden items-center justify-between border-t border-slate-100 pt-5 lg:flex">
+                <Button variant="secondary" icon={ChevronLeft} onClick={() => setCurrentQuestion((p) => p - 1)} disabled={currentQuestion === 0}>
+                  Previous
+                </Button>
+                <span className="font-mono text-xs text-slate-500">{currentQuestion + 1} / {questions.length}</span>
+                {currentQuestion === questions.length - 1 ? (
+                  <Button variant="success" icon={Send} onClick={() => setShowSubmitConfirm(true)} disabled={submitting}>Review & submit</Button>
+                ) : (
+                  <Button iconRight={ChevronRight} onClick={() => setCurrentQuestion((p) => p + 1)}>Next</Button>
+                )}
               </div>
-              <div style={{ width:"100%", background:"#f1f5f9", borderRadius:99, height:6 }}>
-                <div style={{ width:`${progress}%`, background:"linear-gradient(90deg,#10b981,#059669)", height:6, borderRadius:99, transition:"width .4s ease" }} />
-              </div>
-            </div>
+            </article>
+          </div>
+        </main>
 
-            {/* Stats */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-              {[
-                { val:answeredCount, label:"Done",   bg:"#d1fae5", border:"#6ee7b7", color:"#065f46" },
-                { val:markedCount,   label:"Marked", bg:"#fef3c7", border:"#fcd34d", color:"#92400e" },
-                { val:notVisited,    label:"Left",   bg:"#f1f5f9", border:"#e2e8f0", color:"#475569" },
-              ].map(({ val, label, bg, border, color }) => (
-                <div key={label} style={{ background:bg, border:`1px solid ${border}`, borderRadius:10, padding:"10px 8px", textAlign:"center" }}>
-                  <p style={{ margin:0, fontSize:20, fontWeight:800, color, fontFamily:"'DM Mono',monospace" }}>{val}</p>
-                  <p style={{ margin:"2px 0 0", fontSize:10, color, fontFamily:"'DM Sans',sans-serif", opacity:.8 }}>{label}</p>
+        {/* ── Side panel (desktop) / camera dock (mobile) — videoRef re-attached via effect ── */}
+        <aside
+          className={cn(
+            "z-20 flex flex-col",
+            "fixed bottom-20 right-3 w-28 sm:w-36",
+            "lg:static lg:w-80 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-slate-200 lg:bg-white"
+          )}
+          aria-label="Proctoring and navigation"
+        >
+          <div className="lg:space-y-5 lg:p-4">
+            {cameraEnabled ? (
+              <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-slate-300 bg-slate-900 shadow-pop lg:rounded-xl lg:border-slate-200 lg:shadow-none">
+                <video ref={videoRef} autoPlay playsInline muted className="h-full w-full -scale-x-100 object-cover" />
+                <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100" />
+                <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white lg:left-2 lg:top-2 lg:px-2">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", cameraActive ? "animate-pulse bg-rose-500" : "bg-slate-400")} /> LIVE
+                </span>
+                {!cameraActive && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-900/85 px-2 text-center">
+                    <CameraOff className="h-5 w-5 text-slate-300" aria-hidden="true" />
+                    <span className="hidden text-xs text-slate-300 lg:block">{cameraError || "Camera unavailable"}</span>
+                  </div>
+                )}
+                <span className="absolute bottom-2 right-2 hidden rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white lg:block">
+                  {modelStatus === "loading" ? "Loading AI…" : modelStatus === "ready" ? "AI active" : "Motion mode"}
+                </span>
+              </div>
+            ) : (
+              <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 lg:flex">
+                <VideoOff className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" /> Camera proctoring is off for this exam
+              </div>
+            )}
+
+            <div className="hidden space-y-5 lg:block">
+              {/* Proctoring status */}
+              <section>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Proctoring</h3>
+                <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {cameraEnabled && statusRows.map(({ label, ok, okText, failText, OkIcon, FailIcon }) => (
+                    <li key={label} className="flex items-center justify-between px-3 py-2 text-xs">
+                      <span className="text-slate-600">{label}</span>
+                      <span className={cn("flex items-center gap-1 font-semibold", ok ? "text-emerald-700" : "text-rose-600")}>
+                        {ok ? <OkIcon className="h-3.5 w-3.5" aria-hidden="true" /> : <FailIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {ok ? okText : failText}
+                      </span>
+                    </li>
+                  ))}
+                  <li className="flex items-center justify-between px-3 py-2 text-xs">
+                    <span className="text-slate-600">Fullscreen</span>
+                    <span className={cn("flex items-center gap-1 font-semibold", isFullscreen ? "text-emerald-700" : "text-rose-600")}>
+                      <Maximize className="h-3.5 w-3.5" aria-hidden="true" />{isFullscreen ? "On" : "Exited"}
+                    </span>
+                  </li>
+                </ul>
+              </section>
+
+              {warnings > 0 && (
+                <div className={cn(
+                  "rounded-lg border px-3 py-2.5",
+                  warnings >= MAX_WARNINGS - 1 ? "border-rose-300 bg-rose-50" : "border-amber-200 bg-amber-50"
+                )}>
+                  <p className={cn("flex items-center gap-1.5 text-sm font-semibold", warnings >= MAX_WARNINGS - 1 ? "text-rose-700" : "text-amber-900")}>
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" /> Warning {warnings} of {MAX_WARNINGS}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    {MAX_WARNINGS - warnings} more and the exam submits automatically.
+                  </p>
                 </div>
-              ))}
+              )}
+
+              <section>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Questions</h3>
+                {questionGrid}
+              </section>
+
+              {counts}
+
+              <Button variant="success" icon={Send} size="lg" fullWidth onClick={() => setShowSubmitConfirm(true)} disabled={submitting}>
+                Submit exam
+              </Button>
             </div>
           </div>
+        </aside>
+      </div>
 
-          {/* Submit */}
-          <div style={{ padding:"14px 16px", borderTop:"1px solid #f1f5f9", background:"#f8fafc" }}>
-            <button
-              onClick={() => setShowSubmitConfirm(true)}
-              disabled={submitting}
-              style={{ width:"100%", background:"linear-gradient(135deg,#059669,#0d9488)", color:"#fff", padding:13, borderRadius:12, border:"none", cursor:submitting?"wait":"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:14, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", gap:7, boxShadow:"0 4px 12px rgba(5,150,105,.3)", opacity:submitting?.7:1 }}
-            >
-              <CheckCircle size={16} /> Submit Exam
-            </button>
-            <p style={{ textAlign:"center", fontSize:11, color:"#94a3b8", margin:"8px 0 0", fontFamily:"'DM Sans',sans-serif" }}>{answeredCount}/{questions.length} answered</p>
+      {/* ── Mobile bottom bar ── */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 flex items-center gap-2 border-t border-slate-200 bg-white px-3 py-2.5 lg:hidden" aria-label="Question navigation">
+        <Button variant="secondary" icon={ChevronLeft} onClick={() => setCurrentQuestion((p) => p - 1)} disabled={currentQuestion === 0} aria-label="Previous question">
+          <span className="hidden sm:inline">Prev</span>
+        </Button>
+        <Button variant="secondary" icon={LayoutGrid} onClick={() => setShowPalette(true)} className="flex-1">
+          {currentQuestion + 1} / {questions.length}
+        </Button>
+        {currentQuestion === questions.length - 1 ? (
+          <Button variant="success" icon={Send} onClick={() => setShowSubmitConfirm(true)} disabled={submitting}>Submit</Button>
+        ) : (
+          <Button iconRight={ChevronRight} onClick={() => setCurrentQuestion((p) => p + 1)} aria-label="Next question">
+            <span className="hidden sm:inline">Next</span>
+          </Button>
+        )}
+      </nav>
+
+      {/* ── Mobile question palette ── */}
+      {showPalette && (
+        <div className="fixed inset-0 z-[66] lg:hidden" role="dialog" aria-modal="true" aria-label="All questions">
+          <div className="absolute inset-0 animate-fade-in bg-slate-900/40" onClick={() => setShowPalette(false)} aria-hidden="true" />
+          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] animate-scale-in overflow-y-auto rounded-t-2xl bg-white p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">All questions</h2>
+              <button type="button" onClick={() => setShowPalette(false)} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {questionGrid}
+            <div className="mt-5">{counts}</div>
+            <Button variant="success" icon={Send} fullWidth size="lg" className="mt-5" onClick={() => { setShowPalette(false); setShowSubmitConfirm(true); }} disabled={submitting}>
+              Submit exam
+            </Button>
           </div>
         </div>
+      )}
 
-      </div>
-    </>
+      {/* ── Submit confirmation ── */}
+      {showSubmitConfirm && (
+        <Modal
+          onClose={() => setShowSubmitConfirm(false)}
+          dismissible={!submitting}
+          size="sm"
+          icon={Send}
+          title="Submit your exam?"
+          description={unansweredCount > 0
+            ? `${unansweredCount} question${unansweredCount !== 1 ? "s are" : " is"} still unanswered.`
+            : "All questions are answered."}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setShowSubmitConfirm(false)} disabled={submitting} data-autofocus>Keep working</Button>
+              <Button variant="success" loading={submitting} onClick={() => { setShowSubmitConfirm(false); submitExam(false); }}>
+                {submitting ? "Submitting…" : "Submit exam"}
+              </Button>
+            </>
+          }
+        >
+          <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm">
+            {[
+              { label: "Answered",          val: answeredCount,   cls: "text-emerald-700" },
+              { label: "Marked for review", val: markedCount,     cls: "text-amber-700" },
+              { label: "Unanswered",        val: unansweredCount, cls: "text-rose-600" },
+            ].map(({ label, val, cls }) => (
+              <div key={label} className="flex justify-between px-3 py-2">
+                <dt className="text-slate-600">{label}</dt>
+                <dd className={cn("font-mono font-bold", cls)}>{val}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 text-xs text-slate-500">You can't change your answers after submitting.</p>
+        </Modal>
+      )}
+
+      {/* Submitting overlay (manual or automatic) */}
+      {submitting && (
+        <div className="fixed inset-0 z-[67] flex items-center justify-center bg-white/80 backdrop-blur-sm" role="status">
+          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-pop">
+            <Loader2 className="h-5 w-5 animate-spin text-brand-600" aria-hidden="true" />
+            <span className="text-sm font-medium text-slate-800">Submitting your answers…</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
-};
-
-// ─── Style tokens ─────────────────────────────────────────────────────────────
-const S = {
-  fullDark: {
-    position:"fixed", inset:0, background:"#0f172a",
-    display:"flex", alignItems:"center", justifyContent:"center",
-    zIndex:9990, padding:24,
-  },
-  overlay: {
-    position:"fixed", inset:0, background:"rgba(0,0,0,.65)",
-    display:"flex", alignItems:"center", justifyContent:"center",
-    zIndex:9999, padding:16, backdropFilter:"blur(4px)",
-  },
-  modal: {
-    background:"#fff", borderRadius:20, width:"100%", maxWidth:380,
-    boxShadow:"0 24px 64px rgba(0,0,0,.25)", padding:28,
-  },
-  spinner: {
-    width:56, height:56, borderRadius:"50%",
-    border:"3px solid #1e40af", borderTopColor:"#3b82f6",
-    margin:"0 auto 20px", animation:"spin 0.8s linear infinite",
-    display:"block",
-  },
-  btnPrimary: {
-    padding:"10px 22px", background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",
-    color:"#fff", border:"none", borderRadius:10, cursor:"pointer",
-    fontFamily:"'DM Sans',sans-serif", fontSize:14, fontWeight:600,
-  },
-  btnSecondary: {
-    padding:"10px 22px", background:"#f8fafc", color:"#374151",
-    border:"1px solid #e5e7eb", borderRadius:10, cursor:"pointer",
-    fontFamily:"'DM Sans',sans-serif", fontSize:14, fontWeight:500,
-  },
-  btnDark: {
-    padding:"10px 22px", background:"#1e293b", color:"#e2e8f0",
-    border:"1px solid #334155", borderRadius:10, cursor:"pointer",
-    fontFamily:"'DM Sans',sans-serif", fontSize:14,
-  },
-  badge: (color) => ({
-    background:"rgba(0,0,0,.6)", color,
-    fontSize:10, padding:"3px 8px", borderRadius:20,
-    fontFamily:"'DM Sans',sans-serif",
-  }),
 };
 
 export default ExamInterface;

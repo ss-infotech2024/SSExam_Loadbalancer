@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "@/services/api";
 import {
-  FaEdit, FaTrash, FaKey, FaTimes, FaCheckCircle,
-  FaExclamationTriangle, FaUserGraduate, FaSearch,
-} from "react-icons/fa";
-import { FiRefreshCw, FiAlertCircle } from "react-icons/fi";
+  Pencil, Trash2, KeyRound, RefreshCw, Users, UserCheck, UserX, UserPlus, Wand2, Lock, FilterX, CheckCircle2, XCircle,
+  ShieldAlert,
+} from "lucide-react";
+import {
+  PageHeader, Button, IconButton, StatCard, Card, SearchInput, Select, Field, Input, Modal, ConfirmDialog,
+  Alert, Badge, Avatar, EmptyState, Skeleton, Pagination, useToast,
+} from "../../components/ui";
+import { formatDateIST } from "../../utils/time";
 
 // Turn axios errors into Error(message) so callers can show err.message
 const toError = (err) => {
@@ -46,29 +50,15 @@ const api = {
       .catch(toError),
 };
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const DEPARTMENTS = ['Data Bricks', 'Service Now'];
+const PAGE_SIZE = 15;
 
-const DEPT_LABELS = {
-  DB :"Data Bricks",
- SN : "Service Now"
-};
-// ─── TOAST ────────────────────────────────────────────────────────────────────
-const Toast = ({ message, type, onClose }) => (
-  <div
-    className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl
-      shadow-2xl text-sm font-semibold transition-all
-      ${type === "success" ? "bg-emerald-600 text-white" : "bg-red-500 text-white"}`}
-  >
-    {type === "success"
-      ? <FaCheckCircle className="shrink-0" />
-      : <FaExclamationTriangle className="shrink-0" />}
-    <span>{message}</span>
-    <button onClick={onClose} className="ml-1 opacity-70 hover:opacity-100">
-      <FaTimes />
-    </button>
-  </div>
-);
+const randomPassword = (chars) =>
+  Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+
+const StatusBadge = ({ status }) =>
+  status === "active"
+    ? <Badge tone="success" icon={CheckCircle2}>Active</Badge>
+    : <Badge tone="danger" icon={XCircle}>Inactive</Badge>;
 
 // ─── EDIT MODAL ───────────────────────────────────────────────────────────────
 const EditModal = ({ student, onClose, onSaved }) => {
@@ -84,7 +74,8 @@ const EditModal = ({ student, onClose, onSaved }) => {
   const handleChange = (e) =>
     setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
-  const handleSave = async () => {
+  const handleSave = async (e) => {
+    e?.preventDefault();
     if (!form.fullName.trim()) return setError("Full name is required");
     if (!form.email.trim())    return setError("Email is required");
 
@@ -103,88 +94,40 @@ const EditModal = ({ student, onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
-        <div className="px-6 py-5 border-b flex items-center justify-between">
-          <h3 className="text-lg font-bold text-gray-900">Edit Student</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <FaTimes size={20} />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg flex items-center gap-2">
-              <FiAlertCircle /> {error}
-            </p>
-          )}
-
-          {/* Full Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-            <input
-              type="text" name="fullName" value={form.fullName} onChange={handleChange}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input
-              type="email" name="email" value={form.email} onChange={handleChange}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-
-          {/* Department — LOCKED, admin cannot move student to another dept */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-            <div className="w-full px-4 py-2.5 border border-gray-200 bg-gray-50 rounded-lg
-              text-sm text-gray-700 flex items-center justify-between">
-              <span className="font-semibold">{form.department}</span>
-              <span className="text-xs text-gray-400 flex items-center gap-1">
-                🔒 Locked
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 mt-1">
-              Department cannot be changed after student creation
-            </p>
-          </div>
-
-          {/* Status */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-            <select
-              name="status" value={form.status} onChange={handleChange}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm appearance-none"
-            >
+    <Modal
+      onClose={onClose}
+      dismissible={!saving}
+      icon={Pencil}
+      title="Edit student"
+      description={`ID ${student.studentId ?? "N/A"}`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button type="submit" form="edit-student-form" loading={saving}>{saving ? "Saving…" : "Save changes"}</Button>
+        </>
+      }
+    >
+      <form id="edit-student-form" onSubmit={handleSave} className="space-y-4">
+        {error && <Alert tone="danger">{error}</Alert>}
+        <Field label="Full name" required>
+          {(p) => <Input {...p} name="fullName" value={form.fullName} onChange={handleChange} />}
+        </Field>
+        <Field label="Email" required>
+          {(p) => <Input {...p} type="email" name="email" value={form.email} onChange={handleChange} />}
+        </Field>
+        <Field label="Department" hint="Department can't be changed after a student is created.">
+          {(p) => <Input {...p} icon={Lock} value={form.department} disabled readOnly />}
+        </Field>
+        <Field label="Status">
+          {(p) => (
+            <Select {...p} name="status" value={form.status} onChange={handleChange}>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm transition"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm
-              disabled:opacity-50 transition flex items-center gap-2"
-          >
-            {saving
-              ? <><FiRefreshCw className="animate-spin w-4 h-4" /> Saving…</>
-              : "Save Changes"}
-          </button>
-        </div>
-      </div>
-    </div>
+            </Select>
+          )}
+        </Field>
+      </form>
+    </Modal>
   );
 };
 
@@ -197,16 +140,14 @@ const PasswordModal = ({ student, onClose }) => {
   const [success,         setSuccess]         = useState(false);
 
   const generateRandom = () => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%";
-    const pwd   = Array.from({ length: 10 }, () =>
-      chars[Math.floor(Math.random() * chars.length)]
-    ).join("");
+    const pwd = randomPassword("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%");
     setNewPassword(pwd);
     setConfirmPassword(pwd);
     setError("");
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e) => {
+    e?.preventDefault();
     setError("");
     if (!newPassword || !confirmPassword) return setError("Both fields are required");
     if (newPassword.length < 6)           return setError("Password must be at least 6 characters");
@@ -225,87 +166,39 @@ const PasswordModal = ({ student, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-bold text-gray-900">Change Password</h3>
-          <p className="text-sm text-gray-500 mt-1">
-            <span className="font-semibold">{student.fullName || student.name}</span>
-            {" "}· ID: {student.studentId ?? "N/A"} · {student.department}
-          </p>
-        </div>
-
-        <div className="p-6 space-y-5">
-          {success ? (
-            <div className="flex items-center gap-3 p-4 bg-green-50 text-green-800 rounded-xl">
-              <FaCheckCircle size={20} />
-              <span className="font-semibold">Password updated successfully!</span>
-            </div>
-          ) : (
+    <Modal
+      onClose={onClose}
+      dismissible={!saving}
+      icon={KeyRound}
+      title="Change password"
+      description={`${student.fullName || student.name} · ID ${student.studentId ?? "N/A"} · ${student.department}`}
+      footer={
+        success
+          ? <Button variant="secondary" onClick={onClose}>Close</Button>
+          : (
             <>
-              <button
-                onClick={generateRandom}
-                className="w-full py-2.5 px-4 bg-purple-50 text-purple-700 border border-purple-200
-                  rounded-lg hover:bg-purple-100 transition text-sm font-medium flex items-center justify-center gap-2"
-              >
-                <FiRefreshCw className="w-4 h-4" /> Generate Random Password
-              </button>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">New Password</label>
-                <input
-                  type="text"     // text so admin can see what they're setting
-                  value={newPassword}
-                  onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
-                  placeholder="Enter new password"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none
-                    focus:ring-2 focus:ring-purple-500 text-sm font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
-                <input
-                  type="text"
-                  value={confirmPassword}
-                  onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
-                  placeholder="Confirm new password"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none
-                    focus:ring-2 focus:ring-purple-500 text-sm font-mono"
-                />
-              </div>
-
-              {error && (
-                <p className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg flex items-center gap-2">
-                  <FaExclamationTriangle /> {error}
-                </p>
-              )}
+              <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button type="submit" form="password-form" loading={saving}>{saving ? "Updating…" : "Update password"}</Button>
             </>
-          )}
-        </div>
-
-        <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
-          {!success && (
-            <button
-              onClick={handleSubmit}
-              disabled={saving}
-              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700
-                text-sm font-medium disabled:opacity-50 transition flex items-center gap-2"
-            >
-              {saving
-                ? <><FiRefreshCw className="animate-spin w-4 h-4" /> Updating…</>
-                : "Update Password"}
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm transition"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+          )
+      }
+    >
+      {success ? (
+        <Alert tone="success" title="Password updated">Share the new password with the student securely.</Alert>
+      ) : (
+        <form id="password-form" onSubmit={handleSubmit} className="space-y-4">
+          <Button variant="subtle" icon={Wand2} onClick={generateRandom} fullWidth>Generate a random password</Button>
+          {/* Plain text on purpose so the admin can see what they're setting */}
+          <Field label="New password" required>
+            {(p) => <Input {...p} value={newPassword} onChange={(e) => { setNewPassword(e.target.value); setError(""); }} placeholder="At least 6 characters" className="font-mono" autoComplete="off" />}
+          </Field>
+          <Field label="Confirm password" required>
+            {(p) => <Input {...p} value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }} placeholder="Re-enter the password" className="font-mono" autoComplete="off" />}
+          </Field>
+          {error && <Alert tone="danger">{error}</Alert>}
+        </form>
+      )}
+    </Modal>
   );
 };
 
@@ -327,75 +220,43 @@ const DeleteModal = ({ student, onClose, onDeleted }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-bold text-red-600">Delete Student</h3>
-          <p className="mt-2 text-gray-600 text-sm">
-            Are you sure you want to delete{" "}
-            <strong>{student.fullName || student.name}</strong>?
-            This action <strong>cannot be undone</strong>.
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            ID: {student.studentId ?? "N/A"} · {student.department}
-          </p>
-        </div>
-
-        {error && (
-          <p className="mx-6 mt-4 text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg flex items-center gap-2">
-            <FaExclamationTriangle /> {error}
-          </p>
-        )}
-
-        <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm transition"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700
-              text-sm font-medium disabled:opacity-50 transition flex items-center gap-2"
-          >
-            {deleting
-              ? <><FiRefreshCw className="animate-spin w-4 h-4" /> Deleting…</>
-              : "Yes, Delete"}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title="Delete student?"
+      message={
+        <>
+          <strong className="text-slate-900">{student.fullName || student.name}</strong> (ID {student.studentId ?? "N/A"}) will be removed permanently. This cannot be undone.
+        </>
+      }
+      confirmLabel={deleting ? "Deleting…" : "Delete student"}
+      loading={deleting}
+      error={error}
+      onConfirm={handleDelete}
+      onCancel={onClose}
+    />
   );
 };
 
-
-const BulkPasswordModal = ({ studentCount, onClose, onSuccess }) => {
+// ─── BULK PASSWORD MODAL ──────────────────────────────────────────────────────
+// Two steps: choose a password → explicit final confirmation. Applies to every student in the department.
+const BulkPasswordModal = ({ studentCount, onClose, onSuccess, showToast }) => {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const generateRandomPassword = () => {
-    const chars =
-      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$";
-    let pwd = "";
-
-    for (let i = 0; i < 10; i++) {
-      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-
-    setPassword(pwd);
+    setPassword(randomPassword("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$"));
+    setError("");
   };
 
   const handleSubmit = async () => {
     if (!password.trim()) {
-      showToast("Enter password first", "error");
+      setError("Enter a password first.");
       return;
     }
 
     if (password.length < 6) {
-      showToast("Password must be at least 6 characters", "error");
+      setError("Password must be at least 6 characters.");
       return;
     }
 
@@ -409,18 +270,12 @@ const BulkPasswordModal = ({ studentCount, onClose, onSuccess }) => {
 
       const res = await api.bulkChangePassword(password);
 
-      showToast(
-        res.message || "Passwords updated successfully.",
-        "success"
-      );
+      showToast(res.message || "Passwords updated successfully.", "success");
 
       onSuccess?.();
 
     } catch (err) {
-      showToast(
-        err?.response?.data?.message || "Unable to update passwords",
-        "error"
-      );
+      showToast(err.message || "Unable to update passwords", "error");
     } finally {
       setLoading(false);
     }
@@ -428,131 +283,88 @@ const BulkPasswordModal = ({ studentCount, onClose, onSuccess }) => {
 
   return (
     <Modal
-      title="Change Password for All Students"
       onClose={onClose}
+      dismissible={!loading}
+      icon={ShieldAlert}
+      title="Reset password for all students"
+      description={`Applies to all ${studentCount} students in your department`}
+      footer={
+        !confirm ? (
+          <>
+            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleSubmit}>Continue</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={() => setConfirm(false)} disabled={loading}>Back</Button>
+            <Button variant="danger" onClick={handleSubmit} loading={loading}>
+              {loading ? "Updating…" : `Yes, update all ${studentCount}`}
+            </Button>
+          </>
+        )
+      }
     >
       {!confirm ? (
-        <>
-          <div className="space-y-4">
-
-            <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm">
-              <strong>Warning</strong>
-              <br />
-              This will change the password for all{" "}
-              <b>{studentCount}</b> students.
-            </div>
-
-            <input
-              type="text"
-              placeholder="Enter new password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2"
-            />
-
-            <button
-              type="button"
-              onClick={generateRandomPassword}
-              className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200"
-            >
-              Generate Random Password
-            </button>
-
-          </div>
-
-          <div className="flex justify-end gap-3 mt-6">
-
-            <button
-              onClick={onClose}
-              className="px-4 py-2 border rounded-lg"
-            >
-              Cancel
-            </button>
-
-            <button
-              onClick={handleSubmit}
-              className="px-4 py-2 rounded-lg bg-purple-600 text-white"
-            >
-              Continue
-            </button>
-
-          </div>
-        </>
+        <div className="space-y-4">
+          <Alert tone="warning" title="This affects every student">
+            Every student in the department will need the new password to sign in.
+          </Alert>
+          <Field label="New password" required error={error}>
+            {(p) => (
+              <Input {...p} value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                placeholder="At least 6 characters" className="font-mono" autoComplete="off" />
+            )}
+          </Field>
+          <Button variant="subtle" icon={Wand2} onClick={generateRandomPassword}>Generate random password</Button>
+        </div>
       ) : (
-        <>
-          <div className="rounded-lg border border-red-300 bg-red-50 p-4">
-
-            <h3 className="font-semibold text-red-700">
-              Final Confirmation
-            </h3>
-
-            <p className="mt-2 text-sm">
-              This will update the password of all{" "}
-              <strong>{studentCount}</strong> students.
-            </p>
-
-            <p className="mt-2">
-              New Password:
-            </p>
-
-            <div className="font-mono bg-white border rounded p-2 mt-1">
-              {password}
-            </div>
-
-            <p className="mt-3 text-red-600 text-sm">
-              This action cannot be undone.
-            </p>
-
+        <div className="space-y-3">
+          <Alert tone="danger" title="Final confirmation">
+            The password for all <strong>{studentCount}</strong> students will be changed. This cannot be undone.
+          </Alert>
+          <div>
+            <p className="label">New password</p>
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm text-slate-900">{password}</p>
           </div>
-
-          <div className="flex justify-end gap-3 mt-6">
-
-            <button
-              onClick={() => setConfirm(false)}
-              className="px-4 py-2 border rounded-lg"
-            >
-              Back
-            </button>
-
-            <button
-              disabled={loading}
-              onClick={handleSubmit}
-              className="px-4 py-2 rounded-lg bg-red-600 text-white disabled:opacity-50"
-            >
-              {loading
-                ? "Updating..."
-                : `Yes, Update All ${studentCount}`}
-            </button>
-
-          </div>
-        </>
+        </div>
       )}
     </Modal>
   );
 };
+
+const RowActions = ({ student, compact, openModal }) => compact ? (
+  <div className="flex flex-wrap gap-2">
+    <Button size="sm" variant="secondary" icon={Pencil} onClick={() => openModal("edit", student)}>Edit</Button>
+    <Button size="sm" variant="secondary" icon={KeyRound} onClick={() => openModal("password", student)}>Password</Button>
+    <Button size="sm" variant="danger-ghost" icon={Trash2} onClick={() => openModal("delete", student)}>Delete</Button>
+  </div>
+) : (
+  <div className="flex justify-end gap-1">
+    <IconButton icon={Pencil} label="Edit student" size="sm" onClick={() => openModal("edit", student)} />
+    <IconButton icon={KeyRound} label="Change password" size="sm" onClick={() => openModal("password", student)} />
+    <IconButton icon={Trash2} label="Delete student" size="sm" variant="danger-ghost" onClick={() => openModal("delete", student)} />
+  </div>
+);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 const ViewStudents = () => {
   const navigate = useNavigate();
+  const showToast = useToast();
 
   const [adminDepartment, setAdminDepartment] = useState("");
   const [students,        setStudents]        = useState([]);
   const [loading,         setLoading]         = useState(true);
+  const [loadError,       setLoadError]       = useState("");
 
   const [searchTerm,    setSearchTerm]    = useState("");
   const [statusFilter,  setStatusFilter]  = useState("");
+  const [page,          setPage]          = useState(1);
 
   // Modal state — only one modal open at a time
-  const [modal,           setModal]           = useState(null); // 'edit' | 'password' | 'delete'
+  const [modal,           setModal]           = useState(null); // 'edit' | 'password' | 'delete' | 'bulk-password'
   const [selectedStudent, setSelectedStudent] = useState(null);
-
-  const [toast, setToast] = useState(null);
-
-  const showToast = useCallback((message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  }, []);
 
   // ── Auth guard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -573,10 +385,12 @@ const ViewStudents = () => {
 
   const loadStudents = async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const data = await api.fetchStudents({ department: adminDepartment });
       setStudents(data.students || []);
     } catch (err) {
+      setLoadError(err.message);
       showToast(err.message, "error");
     } finally {
       setLoading(false);
@@ -599,6 +413,8 @@ const ViewStudents = () => {
     return matchSearch && matchStatus;
   });
 
+  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   // ── Modal helpers ──────────────────────────────────────────────────────────
   const openModal  = (type, student) => { setSelectedStudent(student); setModal(type); };
   const closeModal = ()               => { setSelectedStudent(null);   setModal(null); };
@@ -607,271 +423,165 @@ const ViewStudents = () => {
   const handleUpdated = (updated) => {
     setStudents((p) => p.map((s) => (s._id === updated._id ? updated : s)));
     closeModal();
-    showToast("Student updated successfully");
+    showToast("Student updated.");
   };
 
   const handleDeleted = (deletedId) => {
     setStudents((p) => p.filter((s) => s._id !== deletedId));
     closeModal();
-    showToast("Student deleted successfully");
+    showToast("Student deleted.");
   };
 
-  const clearFilters = () => { setSearchTerm(""); setStatusFilter(""); };
+  const clearFilters = () => { setSearchTerm(""); setStatusFilter(""); setPage(1); };
   const activeFilters = [searchTerm, statusFilter].filter(Boolean).length;
+
+  const activeCount   = students.filter((s) => s.status === "active").length;
+  const inactiveCount = students.filter((s) => s.status === "inactive").length;
+  const initialLoad   = loading && students.length === 0;
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      {toast && (
-        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
-      )}
+    <>
+      <PageHeader
+        title="All students"
+        description={`Students in the ${adminDepartment} department`}
+        actions={
+          <>
+            <IconButton icon={RefreshCw} label="Refresh" variant="secondary" loading={loading} onClick={loadStudents} />
+            <Button variant="secondary" icon={KeyRound} onClick={() => setModal("bulk-password")} disabled={!students.length}>
+              Reset all passwords
+            </Button>
+            <Button icon={UserPlus} onClick={() => navigate("/admin/add-student")}>Add students</Button>
+          </>
+        }
+      />
 
-      <div className="max-w-7xl mx-auto">
+      <div className="mb-6 grid grid-cols-3 gap-3 sm:gap-4">
+        <StatCard label="Total students" value={students.length} icon={Users}     loading={initialLoad} />
+        <StatCard label="Active"         value={activeCount}     icon={UserCheck} tone="success" loading={initialLoad} />
+        <StatCard label="Inactive"       value={inactiveCount}   icon={UserX}     tone="danger" loading={initialLoad} />
+      </div>
 
-        {/* Header */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">View Students</h1>
-            <p className="text-gray-500 mt-1 text-sm">
-              Department: <strong className="text-gray-700">
-                {adminDepartment} — {DEPT_LABELS[adminDepartment] || adminDepartment}
-              </strong>
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setModal("bulk-password")}
-              className="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-            >
-              Change Password for All Students ({filtered.length})
-            </button>
-
-            <button
-              onClick={loadStudents}
-              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition"
-            >
-              <FiRefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        {/* Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
-          {[
-            { label: "Total Students",    value: filtered.length,                                          color: "text-gray-900"  },
-            { label: "Active Students",   value: filtered.filter((s) => s.status === "active").length,    color: "text-green-600" },
-            { label: "Inactive Students", value: filtered.filter((s) => s.status === "inactive").length,  color: "text-red-600"   },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-              <p className="text-sm text-gray-500">{label}</p>
-              {loading
-                ? <div className="h-9 w-14 bg-gray-200 rounded-lg animate-pulse mt-2" />
-                : <p className={`text-3xl font-bold mt-1 ${color}`}>{value}</p>
-              }
-            </div>
-          ))}
-        </div>
-
-        {/* Search & Filter */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search by name, ID or email…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <select
+      <Card>
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center">
+          <SearchInput
+            value={searchTerm}
+            onChange={(v) => { setSearchTerm(v); setPage(1); }}
+            placeholder="Search by name, ID or email"
+            className="sm:flex-1"
+          />
+          <Select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by status"
+            className="sm:w-44"
           >
-            <option value="">All Status</option>
+            <option value="">All statuses</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
-          </select>
-
-          {activeFilters > 0 && (
-            <button
-              onClick={clearFilters}
-              className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-lg
-                hover:bg-red-100 text-sm transition flex items-center gap-2"
-            >
-              <FaTimes /> Clear
-            </button>
-          )}
+          </Select>
+          {activeFilters > 0 && <Button variant="ghost" icon={FilterX} onClick={clearFilters}>Clear</Button>}
         </div>
 
-        {/* Table */}
-        {loading ? (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <table className="min-w-full divide-y divide-gray-100">
-              <thead className="bg-gray-50">
-                <tr>
-                  {["ID", "Student Name", "Email", "Status", "Actions"].map((h) => (
-                    <th key={h} className="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
-                    {[40, 140, 160, 60, 80].map((w, j) => (
-                      <td key={j} className="px-6 py-4">
-                        <div className="h-4 bg-gray-200 rounded-full animate-pulse" style={{ width: w }} />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {initialLoad ? (
+          <div className="space-y-3 p-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-11" />)}</div>
+        ) : loadError && students.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="Couldn't load students"
+            description={loadError}
+            action={<Button variant="secondary" icon={RefreshCw} onClick={loadStudents}>Try again</Button>}
+          />
         ) : filtered.length === 0 ? (
-          <div className="bg-white p-14 rounded-xl shadow-sm text-center border border-gray-200">
-            <FaUserGraduate className="w-14 h-14 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-700 mb-1">No students found</h3>
-            <p className="text-gray-400 text-sm">
-              {students.length === 0
-                ? `No students have been added to ${adminDepartment} yet.`
-                : "No students match your current search or filter."}
-            </p>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="No students found"
+            description={students.length === 0
+              ? `No students have been added to ${adminDepartment} yet.`
+              : "No students match your search or filter."}
+            action={students.length === 0
+              ? <Button icon={UserPlus} onClick={() => navigate("/admin/add-student")}>Add students</Button>
+              : <Button variant="secondary" onClick={clearFilters}>Clear filters</Button>}
+          />
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-100">
-                <thead className="bg-gray-50">
+          <>
+            <div className="table-wrap hidden md:block">
+              <table className="table">
+                <thead>
                   <tr>
-                    {["ID", "Student Name", "Email", "Join Date", "Status", "Actions"].map((h) => (
-                      <th key={h} className="px-6 py-3.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{h}</th>
-                    ))}
+                    <th>ID</th>
+                    <th>Student</th>
+                    <th>Joined</th>
+                    <th>Status</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {filtered.map((student) => (
-                    <tr key={student._id} className="hover:bg-gray-50 transition-colors">
-
-                      {/* ID */}
-                      <td className="px-6 py-3.5">
-                        {student.studentId != null ? (
-                          <span className="inline-flex items-center justify-center min-w-[3rem] px-2.5 py-1
-                            bg-blue-50 text-blue-700 text-xs font-bold rounded-lg font-mono">
-                            {student.studentId}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center justify-center min-w-[3rem] px-2.5 py-1
-                            bg-gray-100 text-gray-400 text-xs font-medium rounded-lg font-mono italic">
-                            N/A
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Name */}
-                      <td className="px-6 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
-                            <span className="text-blue-600 text-sm font-bold">
-                              {(student.fullName || student.name || "?")[0].toUpperCase()}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-800">
-                              {student.fullName || student.name}
-                            </p>
-                            <p className="text-xs text-gray-400">{student.department}</p>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Email */}
-                      <td className="px-6 py-3.5 text-sm text-gray-500">{student.email}</td>
-
-                      {/* Join Date */}
-                      <td className="px-6 py-3.5 text-sm text-gray-400">
-                        {student.joinDate || student.createdAt?.split("T")[0] || "—"}
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-6 py-3.5">
-                        <span className={`px-2.5 py-1 text-xs font-bold rounded-full
-                          ${student.status === "active"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-600"}`}>
-                          {student.status === "active" ? "Active" : "Inactive"}
+                <tbody>
+                  {pageItems.map((student) => (
+                    <tr key={student._id}>
+                      <td>
+                        <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-slate-700">
+                          {student.studentId ?? "N/A"}
                         </span>
                       </td>
-
-                      {/* Actions */}
-                      <td className="px-6 py-3.5">
+                      <td>
                         <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => openModal("edit", student)}
-                            title="Edit student"
-                            className="text-blue-500 hover:text-blue-700 transition"
-                          >
-                            <FaEdit />
-                          </button>
-                          <button
-                            onClick={() => openModal("password", student)}
-                            title="Change password"
-                            className="text-purple-500 hover:text-purple-700 transition"
-                          >
-                            <FaKey />
-                          </button>
-                          <button
-                            onClick={() => openModal("delete", student)}
-                            title="Delete student"
-                            className="text-red-500 hover:text-red-700 transition"
-                          >
-                            <FaTrash />
-                          </button>
+                          <Avatar name={student.fullName || student.name} />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-slate-900">{student.fullName || student.name}</p>
+                            <p className="truncate text-xs text-slate-500">{student.email}</p>
+                          </div>
                         </div>
                       </td>
-
+                      <td className="whitespace-nowrap text-slate-500">
+                        {student.joinDate || (student.createdAt ? formatDateIST(student.createdAt) : "—")}
+                      </td>
+                      <td><StatusBadge status={student.status} /></td>
+                      <td><RowActions student={student} openModal={openModal} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-400">
-              Showing {filtered.length} of {students.length} student{students.length !== 1 ? "s" : ""}
-            </div>
-          </div>
+            <ul className="divide-y divide-slate-100 md:hidden">
+              {pageItems.map((student) => (
+                <li key={student._id} className="space-y-3 p-4">
+                  <div className="flex items-start gap-3">
+                    <Avatar name={student.fullName || student.name} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">{student.fullName || student.name}</p>
+                      <p className="truncate text-xs text-slate-500">{student.email}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <Badge className="font-mono">ID {student.studentId ?? "N/A"}</Badge>
+                        <StatusBadge status={student.status} />
+                      </div>
+                    </div>
+                  </div>
+                  <RowActions student={student} compact openModal={openModal} />
+                </li>
+              ))}
+            </ul>
+
+            <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
+          </>
         )}
-      </div>
+      </Card>
 
       {/* Modals */}
       {modal === "edit"     && selectedStudent && (
-        <EditModal
-          student={selectedStudent}
-          onClose={closeModal}
-          onSaved={handleUpdated}
-        />
+        <EditModal student={selectedStudent} onClose={closeModal} onSaved={handleUpdated} />
       )}
       {modal === "password" && selectedStudent && (
-        <PasswordModal
-          student={selectedStudent}
-          onClose={closeModal}
-        />
+        <PasswordModal student={selectedStudent} onClose={closeModal} />
       )}
       {modal === "delete"   && selectedStudent && (
-        <DeleteModal
-          student={selectedStudent}
-          onClose={closeModal}
-          onDeleted={handleDeleted}
-        />
+        <DeleteModal student={selectedStudent} onClose={closeModal} onDeleted={handleDeleted} />
       )}
       {modal === "bulk-password" && (
         <BulkPasswordModal
-          studentCount={filtered.length}
+          studentCount={students.length}
+          showToast={showToast}
           onClose={closeModal}
           onSuccess={() => {
             closeModal();
@@ -879,7 +589,7 @@ const ViewStudents = () => {
           }}
         />
       )}
-    </div>
+    </>
   );
 };
 

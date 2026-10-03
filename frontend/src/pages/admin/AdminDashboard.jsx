@@ -1,37 +1,36 @@
 // pages/admin/AdminDashboard.jsx
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import API from "@/services/api";
 import {
-  Users, FileText, Award, Monitor, TrendingUp, Star,
-  PlusCircle, Eye, Clock, Calendar, RefreshCw, AlertCircle,
+  Users, ClipboardList, Radio, FileCheck2, TrendingUp, Percent, RefreshCw, ArrowRight,
+  FilePlus2, UserPlus, ScanLine, QrCode, Clock, CalendarDays, Inbox,
 } from "lucide-react";
+import {
+  PageHeader, Button, StatCard, Card, CardHeader, ExamStatusBadge, ScoreBadge, Avatar, EmptyState, ErrorState, Skeleton,
+} from "../../components/ui";
+import { formatDateIST, formatDateTimeShortIST } from "../../utils/time";
+
+const QUICK_ACTIONS = [
+  { to: "/admin/create-exam",             label: "Create exam",     icon: FilePlus2 },
+  { to: "/admin/add-student",             label: "Add students",    icon: UserPlus },
+  { to: "/admin/qr-scanner",              label: "QR attendance",   icon: ScanLine },
+  { to: "/admin/student-registration-qr", label: "Registration QR", icon: QrCode },
+];
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const [adminDepartment, setAdminDepartment] = useState("DB");
+  const adminDepartment = localStorage.getItem("adminDepartment") || "";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState({
-    totalStudents: 1,
-    totalExams: 1,
-    averageScore: 100,
-    activeExams: 1,
-    totalResults: 1,
-    passRate: 100,
+    totalStudents: 0, totalExams: 0, averageScore: 0, activeExams: 0, totalResults: 0, passRate: 0,
   });
   const [recentExams, setRecentExams] = useState([]);
   const [recentResults, setRecentResults] = useState([]);
 
-  useEffect(() => {
-    const dept = localStorage.getItem("adminDepartment") || "DB";
-    setAdminDepartment(dept);
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    setError("");
+  // Writes state only after the requests settle (safe to call from the mount effect).
+  const fetchDashboardData = useCallback(async () => {
     try {
       const [studentsRes, examsRes, resultsRes] = await Promise.all([
         API.get("/admin/students"),
@@ -43,185 +42,163 @@ const AdminDashboard = () => {
       const exams = examsRes.data.exams || [];
       const results = resultsRes.data.results || [];
 
-      // Stats
-      const totalStudents = students.length;
-      const totalExams = exams.length;
-      const activeExams = exams.filter((e) => e.status === "active").length;
       const totalResults = results.length;
-
       let totalScore = 0;
       results.forEach(r => totalScore += r.percentage || 0);
-      const averageScore = totalResults > 0 ? Math.round(totalScore / totalResults) : 0;
-      const passRate = totalResults > 0 
-        ? Math.round((results.filter(r => (r.percentage || 0) >= 40).length / totalResults) * 100) 
-        : 0;
 
       setStats({
-        totalStudents,
-        totalExams,
-        averageScore,
-        activeExams,
+        totalStudents: students.length,
+        totalExams:    exams.length,
+        activeExams:   exams.filter((e) => e.status === "active").length,
         totalResults,
-        passRate,
+        averageScore:  totalResults > 0 ? Math.round(totalScore / totalResults) : 0,
+        passRate:      totalResults > 0
+          ? Math.round((results.filter(r => (r.percentage || 0) >= 40).length / totalResults) * 100)
+          : 0,
       });
 
-      // Recent Exams (latest 3)
-      const recentE = [...exams]
-        .sort((a, b) => new Date(b.createdAt || b.startTime) - new Date(a.createdAt || a.startTime))
-        .slice(0, 3);
-      setRecentExams(recentE);
-
-      // Recent Results (latest 3)
-      const recentR = [...results]
-        .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))
-        .slice(0, 3);
-      setRecentResults(recentR);
-
+      // Live first, then upcoming by start time, then most recent
+      const order = { active: 0, upcoming: 1, completed: 2 };
+      setRecentExams(
+        [...exams]
+          .sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3) ||
+            new Date(b.createdAt || b.startTime) - new Date(a.createdAt || a.startTime))
+          .slice(0, 5)
+      );
+      setRecentResults(
+        [...results].sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)).slice(0, 5)
+      );
+      setError("");
     } catch (err) {
       console.error("Dashboard fetch error:", err);
       setError(err.response?.data?.message || "Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const statCards = [
-    { title: "Total Students", value: stats.totalStudents, icon: Users, color: "text-blue-600", change: "+12%" },
-    { title: "Total Exams", value: stats.totalExams, icon: FileText, color: "text-green-600", change: "+8%" },
-    { title: "Average Score", value: `${stats.averageScore}%`, icon: Award, color: "text-amber-600", change: "Excellent" },
-    { title: "Active Exams", value: stats.activeExams, icon: Monitor, color: "text-purple-600", change: "Live Now" },
-    { title: "Total Results", value: stats.totalResults, icon: TrendingUp, color: "text-indigo-600", change: "Submitted" },
-    { title: "Pass Rate", value: `${stats.passRate}%`, icon: Star, color: "text-emerald-600", change: "Good" },
-  ];
+  useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
+
+  const refresh = () => { setLoading(true); fetchDashboardData(); };
+
+  const studentName = (r) => r.studentName || r.student?.name || r.student?.fullName || "Student";
+  const examName = (r) => r.examName || r.exam?.subject || "Exam";
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-6 py-8">
+    <>
+      <PageHeader
+        title="Dashboard"
+        description={adminDepartment ? `Overview of the ${adminDepartment} department` : "Department overview"}
+        actions={
+          <>
+            <Button variant="secondary" icon={RefreshCw} onClick={refresh} loading={loading}>Refresh</Button>
+            <Button icon={FilePlus2} onClick={() => navigate("/admin/create-exam")}>Create exam</Button>
+          </>
+        }
+      />
 
-        {/* Welcome Header */}
-        <div className="flex items-center justify-between mb-10">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900">Welcome, Admin</h1>
-            <p className="text-xl text-gray-600 mt-1">
-              Managing <span className="font-semibold text-blue-600">{adminDepartment}</span> Department
-            </p>
-          </div>
-          <button
-            onClick={fetchDashboardData}
-            className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
-        </div>
+      {error && (
+        <Card className="mb-6"><ErrorState title="Couldn't load the dashboard" message={error} onRetry={refresh} /></Card>
+      )}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-2xl mb-8 flex items-center gap-3">
-            <AlertCircle className="w-5 h-5" />
-            {error}
-          </div>
-        )}
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-12">
-          {statCards.map((stat, i) => (
-            <div key={i} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <stat.icon className={`w-8 h-8 ${stat.color}`} />
-                <span className="text-xs font-medium text-gray-400">{stat.change}</span>
-              </div>
-              <div className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</div>
-              <div className="text-sm text-gray-500">{stat.title}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Recent Exams */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                Recent Exams
-              </h2>
-              <button 
-                onClick={() => navigate("/admin/exams")}
-                className="text-blue-600 text-sm hover:underline"
-              >
-                View All
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {recentExams.length === 0 ? (
-                <p className="text-gray-500 py-8 text-center">No exams yet</p>
-              ) : (
-                recentExams.map((exam) => (
-                  <div key={exam._id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl hover:bg-gray-100 transition-colors">
-                    <div>
-                      <div className="font-semibold text-gray-900">{exam.subject}</div>
-                      <div className="text-sm text-gray-500 flex items-center gap-4 mt-1">
-                        <span>{exam.duration} min</span>
-                        <span>{exam.questions?.length || 0} Qs</span>
-                        <span>{new Date(exam.startTime).toLocaleDateString('en-IN')}</span>
-                      </div>
-                    </div>
-                    
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Recent Results */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                Recent Results
-              </h2>
-              <button 
-                onClick={() => navigate("/admin/student-scores")}
-                className="text-blue-600 text-sm hover:underline"
-              >
-                View All
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {recentResults.length === 0 ? (
-                <p className="text-gray-500 py-8 text-center">No results yet</p>
-              ) : (
-                recentResults.map((result) => (
-                  <div key={result._id} className="p-4 bg-gray-50 rounded-2xl hover:bg-gray-100 transition-colors">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-semibold text-gray-900 flex items-center gap-2">
-                          {result.studentName || result.student?.name || "tejas khope"}
-                          <span className="text-emerald-600 font-bold">{result.grade}</span>
-                        </div>
-                        <div className="text-sm text-gray-600 mt-0.5">{result.examName || result.exam?.subject || "sdsd"}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900">
-                          {result.score}/{result.totalMarks}
-                        </div>
-                        <div className="text-xs text-gray-500">{result.percentage}%</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 text-sm text-gray-600">
-                      {result.correctCount} correct • {result.wrongCount} wrong
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {result.submittedAt ? new Date(result.submittedAt).toLocaleDateString('en-IN') : "07/04/2026"}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard label="Students"      value={stats.totalStudents}     icon={Users}         loading={loading} />
+        <StatCard label="Exams"         value={stats.totalExams}        icon={ClipboardList} tone="neutral" loading={loading} />
+        <StatCard label="Live now"      value={stats.activeExams}       icon={Radio}         tone="success" loading={loading} />
+        <StatCard label="Results"       value={stats.totalResults}      icon={FileCheck2}    tone="info" loading={loading} />
+        <StatCard label="Average score" value={`${stats.averageScore}%`} icon={TrendingUp}   tone="neutral" loading={loading} />
+        <StatCard label="Pass rate"     value={`${stats.passRate}%`}    icon={Percent}       tone="success" loading={loading} />
       </div>
-    </div>
+
+      {/* Quick actions */}
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {QUICK_ACTIONS.map(({ to, label, icon: Icon }) => (
+          <Link
+            key={to}
+            to={to}
+            className="card group flex items-center gap-3 p-4 transition-colors hover:border-brand-300 hover:bg-brand-50/40"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 transition-colors group-hover:bg-brand-100">
+              <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+            </span>
+            <span className="text-sm font-semibold text-slate-800">{label}</span>
+            <ArrowRight className="ml-auto hidden h-4 w-4 text-slate-300 group-hover:text-brand-600 sm:block" aria-hidden="true" />
+          </Link>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Exams */}
+        <Card>
+          <CardHeader
+            title="Exams"
+            description="Live and upcoming first"
+            icon={ClipboardList}
+            actions={<Link to="/admin/exams" className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">View all <ArrowRight className="h-4 w-4" /></Link>}
+          />
+          {loading ? (
+            <div className="space-y-3 p-5">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12" />)}</div>
+          ) : recentExams.length === 0 ? (
+            <EmptyState
+              icon={Inbox}
+              title="No exams yet"
+              action={<Button size="sm" icon={FilePlus2} onClick={() => navigate("/admin/create-exam")}>Create exam</Button>}
+            />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {recentExams.map((exam) => (
+                <li key={exam._id}>
+                  <Link to={`/admin/exams/${exam._id}/attempts`} className="flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-slate-50">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">{exam.subject}</p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                        <span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" />{formatDateTimeShortIST(exam.startTime)}</span>
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{exam.duration} min</span>
+                        <span>{exam.questionCount ?? exam.questions?.length ?? 0} questions</span>
+                      </p>
+                    </div>
+                    <ExamStatusBadge status={exam.status} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/* Results */}
+        <Card>
+          <CardHeader
+            title="Latest results"
+            icon={FileCheck2}
+            actions={<Link to="/admin/student-scores" className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">View all <ArrowRight className="h-4 w-4" /></Link>}
+          />
+          {loading ? (
+            <div className="space-y-3 p-5">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12" />)}</div>
+          ) : recentResults.length === 0 ? (
+            <EmptyState icon={Inbox} title="No results yet" description="Results appear when students submit exams." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {recentResults.map((result, i) => (
+                <li key={result._id || i} className="flex items-center gap-3 px-5 py-3.5">
+                  <Avatar name={studentName(result)} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">{studentName(result)}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {examName(result)}
+                      {result.submittedAt && <> · {formatDateIST(result.submittedAt)}</>}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold tabular text-slate-900">{result.score}/{result.totalMarks}</p>
+                    <div className="mt-0.5"><ScoreBadge percentage={result.percentage} /></div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    </>
   );
 };
 
