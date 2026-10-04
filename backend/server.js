@@ -45,8 +45,12 @@ function createApp() {
         "http://localhost:5174",
         "http://localhost:5175",
         "https://ssexam.ssinfotech.co.in",
+        
+        "http://ssexam.ssinfotech.co.in",
+
         // Production Frontend
         "https://ss-exam-psi.vercel.app",
+        
 
         // Old / other production frontends
         "https://ss-exam-portal.netlify.app",
