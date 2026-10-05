@@ -51,7 +51,6 @@ function createApp() {
         // Production Frontend
         "https://ss-exam-psi.vercel.app",
         
-
         // Old / other production frontends
         "https://ss-exam-portal.netlify.app",
         "https://exam.ssinfotech.co.in",
