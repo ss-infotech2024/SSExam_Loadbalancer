@@ -38,26 +38,53 @@ const WORKER_COUNT =
 function createApp() {
   const app = express();
 
-  app.use(
-    cors({
-      origin: [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "https://ssexam.ssinfotech.co.in",
-        
-        "http://ssexam.ssinfotech.co.in",
+  const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
 
-        // Production Frontend
-        "https://ss-exam-psi.vercel.app",
-        
-        // Old / other production frontends
-        "https://ss-exam-portal.netlify.app",
-        "https://exam.ssinfotech.co.in",
-      ],
-      credentials: true,
-    })
-  );
+  "https://ssexam.ssinfotech.co.in",
+  "http://ssexam.ssinfotech.co.in",
+
+  "https://ss-exam-psi.vercel.app",
+  "https://ss-exam-portal.netlify.app",
+  "https://exam.ssinfotech.co.in",
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests without Origin
+      // e.g. Postman/server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn("Blocked CORS origin:", origin);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+
+    credentials: true,
+
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+      "Origin",
+      "X-Requested-With",
+    ],
+
+    optionsSuccessStatus: 204,
+  })
+);
+
+app.options("*", cors());
 
   // Middleware
   app.use(express.json());
