@@ -45,6 +45,8 @@ function createApp() {
 
   "https://ssexam.ssinfotech.co.in",
   "http://ssexam.ssinfotech.co.in",
+  "https://www.ssexam.ssinfotech.co.in",
+  "http://www.ssexam.ssinfotech.co.in",
 
   "https://ss-exam-psi.vercel.app",
   "https://ss-exam-portal.netlify.app",
