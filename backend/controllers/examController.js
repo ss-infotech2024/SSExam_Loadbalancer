@@ -7,6 +7,29 @@ import { body, validationResult } from 'express-validator';
 import Exam from '../models/exam.model.js';
 import User from '../models/user.models.js';
 import ExamAttempt from '../models/examattempt.model.js';
+import ExamSession from '../models/examSession.model.js';
+
+// A live session that hasn't sent a heartbeat for this long is treated as gone
+const LIVE_TIMEOUT_MS = 90 * 1000;
+
+// Deterministic shuffle seeded by exam + student — a student who reloads
+// gets the same order, but each student gets a different one.
+const seededShuffle = (items, seedText) => {
+  let seed = 0;
+  for (const ch of seedText) seed = (Math.imul(seed, 31) + ch.charCodeAt(0)) | 0;
+  const rand = () => {                       // mulberry32
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+};
 
 // ── ES Module __dirname fix (required for path.resolve to work) ───────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -49,6 +72,7 @@ const shapeExam = (exam) => ({
   marksPerQuestion: exam.marksPerQuestion ?? 1,
   totalMarks:       (exam.questions?.length ?? 0) * (exam.marksPerQuestion ?? 1),
   cameraEnabled:    exam.cameraEnabled ?? true,
+  shuffleQuestions: exam.shuffleQuestions ?? false,
   createdAt:        exam.createdAt,
   createdBy:        exam.createdBy,
 });
@@ -104,6 +128,7 @@ export const createExam = [
   body('endTime').notEmpty().isISO8601().withMessage('Valid end time is required'),
   body('marksPerQuestion').isInt({ min: 1, max: 10 }).withMessage('Marks per question must be between 1 and 10'),
   body('cameraEnabled').optional().isBoolean().withMessage('cameraEnabled must be true or false').toBoolean(true),
+  body('shuffleQuestions').optional().isBoolean().withMessage('shuffleQuestions must be true or false').toBoolean(true),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
   body('questions.*.text').if(body('questions').exists()).trim().notEmpty().withMessage('Each question must have text'),
   body('questions.*.options').if(body('questions').exists()).isArray({ min: 4, max: 4 }).withMessage('Each question must have exactly 4 options'),
@@ -115,7 +140,7 @@ export const createExam = [
       const adminDept = await getAdminDept(req, res);
       if (!adminDept) return;
 
-      const { subject, duration, startTime, endTime, marksPerQuestion, cameraEnabled, questions = [] } = req.body;
+      const { subject, duration, startTime, endTime, marksPerQuestion, cameraEnabled, shuffleQuestions, questions = [] } = req.body;
 
       if (new Date(endTime) <= new Date(startTime))
         return res.status(400).json({ message: 'End time must be after start time' });
@@ -141,6 +166,7 @@ export const createExam = [
         createdBy:        req.user._id || req.user.id,
         marksPerQuestion: Number(marksPerQuestion),
         cameraEnabled:    typeof cameraEnabled === 'boolean' ? cameraEnabled : true,
+        shuffleQuestions: shuffleQuestions === true,
         questions:        questions.map(q => ({
           text:          q.text.trim(),
           options:       q.options.map(o => String(o).trim()),
@@ -172,6 +198,7 @@ export const updateExam = [
   body('startTime').optional().isISO8601().withMessage('Invalid start time'),
   body('endTime').optional().isISO8601().withMessage('Invalid end time'),
   body('cameraEnabled').optional().isBoolean().withMessage('cameraEnabled must be true or false').toBoolean(true),
+  body('shuffleQuestions').optional().isBoolean().withMessage('shuffleQuestions must be true or false').toBoolean(true),
   body('questions').optional().isArray().withMessage('Questions must be an array'),
 
   async (req, res) => {
@@ -183,7 +210,7 @@ export const updateExam = [
       const exam = await Exam.findOne({ _id: req.params.id, department: adminDept });
       if (!exam) return res.status(404).json({ message: 'Exam not found or not in your department' });
 
-      const { subject, duration, startTime, endTime, cameraEnabled, questions } = req.body;
+      const { subject, duration, startTime, endTime, cameraEnabled, shuffleQuestions, questions } = req.body;
 
       if (subject)   exam.subject   = subject.trim();
       if (duration)  exam.duration  = Number(duration);
@@ -191,6 +218,7 @@ export const updateExam = [
       if (endTime)   exam.endTime   = new Date(endTime);
       // explicit type check — `if (cameraEnabled)` would silently drop `false`
       if (typeof cameraEnabled === 'boolean') exam.cameraEnabled = cameraEnabled;
+      if (typeof shuffleQuestions === 'boolean') exam.shuffleQuestions = shuffleQuestions;
 
       if (exam.endTime <= exam.startTime)
         return res.status(400).json({ message: 'End time must be after start time' });
@@ -263,6 +291,87 @@ export const downloadExamTemplate = (req, res) => {
   res.sendFile(templatePath);
 };
 
+// ── Excel "Questions" sheet → [{ text, options, correctAnswer }] ──────────────
+// Returns { questions } or { error: { message, errors? } } (send as a 400 body)
+const parseQuestionsSheet = (workbook) => {
+  if (!workbook.SheetNames.includes('Questions')) {
+    return { error: { message: 'Sheet "Questions" not found. Please use the provided template without renaming sheets.' } };
+  }
+
+  const qSheet  = workbook.Sheets['Questions'];
+  const rawRows = xlsx.utils.sheet_to_json(qSheet, {
+    header: ['num', 'text', 'optA', 'optB', 'optC', 'optD', 'correct'],
+    range:  1,
+    defval: '',
+  });
+
+  const filledRows = rawRows.filter(
+    (r) => String(r.text || '').trim() || String(r.optA || '').trim() || String(r.correct || '').trim()
+  );
+
+  if (filledRows.length === 0) {
+    return { error: { message: 'No questions found in the "Questions" sheet. Please add at least one question.' } };
+  }
+
+  const answerMap      = { A: 0, B: 1, C: 2, D: 3 };
+  const questions      = [];
+  const questionErrors = [];
+
+  filledRows.forEach((row, i) => {
+    const rowNum  = i + 2;
+    const qText   = String(row.text    || '').trim();
+    const optA    = String(row.optA    || '').trim();
+    const optB    = String(row.optB    || '').trim();
+    const optC    = String(row.optC    || '').trim();
+    const optD    = String(row.optD    || '').trim();
+    const correct = String(row.correct || '').trim().toUpperCase();
+
+    if (!qText)  questionErrors.push(`Row ${rowNum}: Question text is required.`);
+    if (!optA)   questionErrors.push(`Row ${rowNum}: Option A is required.`);
+    if (!optB)   questionErrors.push(`Row ${rowNum}: Option B is required.`);
+    if (!optC)   questionErrors.push(`Row ${rowNum}: Option C is required.`);
+    if (!optD)   questionErrors.push(`Row ${rowNum}: Option D is required.`);
+    if (!['A', 'B', 'C', 'D'].includes(correct))
+      questionErrors.push(`Row ${rowNum}: Correct Answer must be A, B, C, or D (got "${row.correct}").`);
+
+    if (qText && optA && optB && optC && optD && ['A', 'B', 'C', 'D'].includes(correct)) {
+      questions.push({
+        text:          qText,
+        options:       [optA, optB, optC, optD],
+        correctAnswer: answerMap[correct],
+      });
+    }
+  });
+
+  if (questionErrors.length)
+    return { error: { message: 'Validation errors in the Questions sheet:', errors: questionErrors } };
+
+  return { questions };
+};
+
+// =============================================================================
+// POST /api/admin/exams/questions/parse
+// Reads only the "Questions" sheet and returns the questions WITHOUT saving —
+// Edit Exam loads them into the editor and the admin saves as usual.
+// =============================================================================
+export const parseQuestionsExcel = (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No Excel file uploaded. Use field name "examFile".' });
+  }
+
+  let workbook;
+  try {
+    workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+  } catch {
+    return res.status(400).json({ message: 'Invalid Excel file. Please use the provided template.' });
+  }
+
+  const parsed = parseQuestionsSheet(workbook);
+  if (parsed.error) return res.status(400).json(parsed.error);
+
+  res.status(200).json({ questions: parsed.questions, count: parsed.questions.length });
+};
+
 // =============================================================================
 // POST /api/admin/exams/upload
 // =============================================================================
@@ -329,61 +438,9 @@ export const uploadAndCreateExam = async (req, res) => {
       return res.status(400).json({ message: infoErrors.join(' | ') });
 
     // 3. Read "Questions" sheet
-    if (!workbook.SheetNames.includes('Questions')) {
-      return res.status(400).json({
-        message: 'Sheet "Questions" not found. Please use the provided template without renaming sheets.',
-      });
-    }
-
-    const qSheet  = workbook.Sheets['Questions'];
-    const rawRows = xlsx.utils.sheet_to_json(qSheet, {
-      header: ['num', 'text', 'optA', 'optB', 'optC', 'optD', 'correct'],
-      range:  1,
-      defval: '',
-    });
-
-    const filledRows = rawRows.filter(
-      (r) => String(r.text || '').trim() || String(r.optA || '').trim() || String(r.correct || '').trim()
-    );
-
-    if (filledRows.length === 0) {
-      return res.status(400).json({
-        message: 'No questions found in the "Questions" sheet. Please add at least one question.',
-      });
-    }
-
-    const answerMap     = { A: 0, B: 1, C: 2, D: 3 };
-    const questions     = [];
-    const questionErrors = [];
-
-    filledRows.forEach((row, i) => {
-      const rowNum  = i + 2;
-      const qText   = String(row.text    || '').trim();
-      const optA    = String(row.optA    || '').trim();
-      const optB    = String(row.optB    || '').trim();
-      const optC    = String(row.optC    || '').trim();
-      const optD    = String(row.optD    || '').trim();
-      const correct = String(row.correct || '').trim().toUpperCase();
-
-      if (!qText)  questionErrors.push(`Row ${rowNum}: Question text is required.`);
-      if (!optA)   questionErrors.push(`Row ${rowNum}: Option A is required.`);
-      if (!optB)   questionErrors.push(`Row ${rowNum}: Option B is required.`);
-      if (!optC)   questionErrors.push(`Row ${rowNum}: Option C is required.`);
-      if (!optD)   questionErrors.push(`Row ${rowNum}: Option D is required.`);
-      if (!['A', 'B', 'C', 'D'].includes(correct))
-        questionErrors.push(`Row ${rowNum}: Correct Answer must be A, B, C, or D (got "${row.correct}").`);
-
-      if (qText && optA && optB && optC && optD && ['A', 'B', 'C', 'D'].includes(correct)) {
-        questions.push({
-          text:          qText,
-          options:       [optA, optB, optC, optD],
-          correctAnswer: answerMap[correct],
-        });
-      }
-    });
-
-    if (questionErrors.length)
-      return res.status(400).json({ message: 'Validation errors in the Questions sheet:', errors: questionErrors });
+    const parsed = parseQuestionsSheet(workbook);
+    if (parsed.error) return res.status(400).json(parsed.error);
+    const { questions } = parsed;
 
     // 4. Admin department
     const adminDept = await getAdminDept(req, res);
@@ -460,6 +517,10 @@ export const getStudentExamById = async (req, res) => {
     if (now < exam.startTime) return res.status(403).json({ message: 'This exam has not started yet' });
     if (now > exam.endTime)   return res.status(403).json({ message: 'This exam has already ended' });
 
+    const questions = exam.shuffleQuestions
+      ? seededShuffle(exam.questions, `${exam._id}:${student._id}`)
+      : exam.questions;
+
     res.status(200).json({
       exam: {
         _id:              exam._id,
@@ -470,7 +531,7 @@ export const getStudentExamById = async (req, res) => {
         marksPerQuestion: exam.marksPerQuestion,
         totalMarks:       exam.questions.length * exam.marksPerQuestion,
         cameraEnabled:    exam.cameraEnabled ?? true,
-        questions:        exam.questions.map(q => ({
+        questions:        questions.map(q => ({
           _id:     q._id,
           text:    q.text,
           options: q.options,
@@ -479,6 +540,99 @@ export const getStudentExamById = async (req, res) => {
     });
   } catch (err) {
     console.error('getStudentExamById:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// =============================================================================
+// POST /api/student/exams/:id/heartbeat
+// Sent when the exam starts and every ~30s while it runs → "live now" for admins
+// =============================================================================
+export const examHeartbeat = async (req, res) => {
+  try {
+    const student = await User.findById(req.user._id || req.user.id).select('_id department role').lean();
+    if (!student || student.role !== 'student')
+      return res.status(403).json({ message: 'Access denied' });
+
+    const exam = await Exam.findOne({ _id: req.params.id, department: student.department })
+      .select('startTime endTime').lean();
+    if (!exam) return res.status(404).json({ message: 'Exam not found' });
+
+    const now = new Date();
+    if (now < exam.startTime || now > exam.endTime)
+      return res.status(200).json({ ok: false });
+
+    const submitted = await ExamAttempt.exists({ examId: exam._id, studentId: student._id });
+    if (submitted) return res.status(200).json({ ok: false, submitted: true });
+
+    await ExamSession.updateOne(
+      { examId: exam._id, studentId: student._id },
+      {
+        $set:         { lastSeenAt: now },
+        $setOnInsert: { startedAt: now, department: student.department },
+      },
+      { upsert: true }
+    );
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    if (err.code === 11000) return res.status(200).json({ ok: true }); // concurrent upsert race
+    console.error('examHeartbeat:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// =============================================================================
+// GET /api/admin/students/exam-activity
+// Live sessions + submitted attempts for the admin's department,
+// used by "All students" for exam / date filters and the "Live now" view
+// =============================================================================
+export const getStudentExamActivity = async (req, res) => {
+  try {
+    const adminDept = await getAdminDept(req, res);
+    if (!adminDept) return;
+
+    const exams = await Exam.find({ department: adminDept })
+      .select('_id subject startTime endTime').sort({ startTime: -1 }).lean();
+    const examById = new Map(exams.map((e) => [String(e._id), e]));
+    const examIds  = exams.map((e) => e._id);
+    const now      = new Date();
+
+    const [sessions, attempts] = await Promise.all([
+      ExamSession.find({ department: adminDept, lastSeenAt: { $gte: new Date(now - LIVE_TIMEOUT_MS) } }).lean(),
+      ExamAttempt.find({ examId: { $in: examIds } })
+        .select('examId studentId startedAt submittedAt percentage grade terminated').lean(),
+    ]);
+
+    const live = sessions
+      .filter((s) => {
+        const exam = examById.get(String(s.examId));
+        return exam && now <= exam.endTime;
+      })
+      .map((s) => ({
+        studentId:  s.studentId,
+        examId:     s.examId,
+        subject:    examById.get(String(s.examId)).subject,
+        endTime:    examById.get(String(s.examId)).endTime,
+        startedAt:  s.startedAt,
+        lastSeenAt: s.lastSeenAt,
+      }));
+
+    res.status(200).json({
+      exams: exams.map((e) => ({ _id: e._id, subject: e.subject, startTime: e.startTime, endTime: e.endTime, status: computeStatus(e) })),
+      live,
+      attempts: attempts.map((a) => ({
+        studentId:   a.studentId,
+        examId:      a.examId,
+        subject:     examById.get(String(a.examId))?.subject,
+        startedAt:   a.startedAt,
+        submittedAt: a.submittedAt,
+        percentage:  a.percentage,
+        grade:       a.grade,
+        terminated:  a.terminated,
+      })),
+    });
+  } catch (err) {
+    console.error('getStudentExamActivity:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -526,13 +680,26 @@ export const submitExam = async (req, res) => {
       });
     }
 
-    const formattedAnswers = answers.map((item, index) => {
+    const readAnswer = (item) => {
       let userAnswer = -1;
       if (typeof item === 'number') userAnswer = item;
       else if (item && typeof item === 'object') userAnswer = item.selectedOption ?? item.userAnswer ?? -1;
       if (userAnswer !== -1 && (userAnswer < 0 || userAnswer > 3)) userAnswer = -1;
+      return userAnswer;
+    };
 
-      const question     = exam.questions[index];
+    // Match answers by questionId (question order may be shuffled per student).
+    // Falls back to position only when every answer can't be matched by id.
+    const answerById = new Map();
+    answers.forEach((item) => {
+      if (item && typeof item === 'object' && item.questionId) answerById.set(String(item.questionId), item);
+    });
+    const matchById = exam.questions.every((q) => answerById.has(String(q._id)));
+
+    // Stored in the exam's original question order so result views stay consistent
+    const formattedAnswers = exam.questions.map((question, index) => {
+      const userAnswer = readAnswer(matchById ? answerById.get(String(question._id)) : answers[index]);
+
       const isCorrect    = userAnswer === question.correctAnswer;
       const marksObtained = isCorrect ? exam.marksPerQuestion : 0;
       return { questionId: question._id, userAnswer, isCorrect, marksObtained };
@@ -557,12 +724,16 @@ export const submitExam = async (req, res) => {
       else wrongCount++;
     });
 
+    const session = await ExamSession.findOne({ examId: exam._id, studentId: student._id }).select('startedAt').lean();
+
     const attempt = await ExamAttempt.create({
       examId: exam._id, studentId: student._id,
       answers: formattedAnswers, score, totalMarks, percentage, grade,
-      status: 'completed', submittedAt: new Date(), startedAt: new Date(),
+      status: 'completed', submittedAt: new Date(), startedAt: session?.startedAt || new Date(),
       terminated: !!terminatedBy, terminationReason: terminationReason || null,
     });
+
+    await ExamSession.deleteOne({ examId: exam._id, studentId: student._id }).catch(() => {});
 
     res.status(200).json({
       success: true,

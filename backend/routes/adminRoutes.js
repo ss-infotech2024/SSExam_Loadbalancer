@@ -28,10 +28,12 @@ import {
   getExamAttendees,
   exportExamAttendees,
   resetExamAttempt,
+  getStudentExamActivity,
 } from '../controllers/examController.js';
 import {
   downloadExamTemplate,
   uploadAndCreateExam,
+  parseQuestionsExcel,
 } from '../controllers/examController.js';      // ← your Excel controller
 import {
   getExamAttempts,
@@ -76,6 +78,7 @@ router.get   ('/students',              getStudents);
 router.post  ('/create-student',        createStudent);
 router.post  ('/students/bulk',         bulkAddStudents);
 router.get   ('/students/download-all',         downloadAllStudentsExcel);
+router.get   ('/students/exam-activity',        getStudentExamActivity);
 router.put   ('/students/:id',          updateStudent);
 router.delete('/students/:id',          deleteStudent);
 router.patch ('/students/:id/password', changeStudentPassword);
@@ -86,6 +89,7 @@ router.patch ('/students/bulk-password', bulkChangeStudentPassword);   // ← NE
 // so Express doesn't treat "template" or "upload" as an :id value
 router.get ('/exams/template/download',    downloadExamTemplate);
 router.post('/exams/upload', handleUpload, uploadAndCreateExam);
+router.post('/exams/questions/parse', handleUpload, parseQuestionsExcel);
 
 // ── Exams (CRUD) ──────────────────────────────────────────────────────────────
 router.get   ('/exams',     getExams);

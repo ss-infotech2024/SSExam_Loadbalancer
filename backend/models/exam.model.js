@@ -52,6 +52,12 @@ const examSchema = new mongoose.Schema({
     default: true,
   },
 
+  // ── Shuffle question order per student — missing on old exams, treated as false
+  shuffleQuestions: {
+    type:    Boolean,
+    default: false,
+  },
+
   questions: {
     type:    [questionSchema],
     default: [],

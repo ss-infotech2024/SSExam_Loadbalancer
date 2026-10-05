@@ -3,13 +3,13 @@ import { useNavigate } from "react-router-dom";
 import API from "@/services/api";
 import {
   Pencil, Trash2, KeyRound, RefreshCw, Users, UserCheck, UserX, UserPlus, Wand2, Lock, FilterX, CheckCircle2, XCircle,
-  ShieldAlert,
+  ShieldAlert, Radio,
 } from "lucide-react";
 import {
   PageHeader, Button, IconButton, StatCard, Card, SearchInput, Select, Field, Input, Modal, ConfirmDialog,
-  Alert, Badge, Avatar, EmptyState, Skeleton, Pagination, useToast,
+  Alert, Badge, Avatar, EmptyState, Skeleton, Pagination, useToast, ScoreBadge, CardHeader,
 } from "../../components/ui";
-import { formatDateIST } from "../../utils/time";
+import { formatDateIST, formatDateTimeShortIST, formatTimeIST } from "../../utils/time";
 
 // Turn axios errors into Error(message) so callers can show err.message
 const toError = (err) => {
@@ -26,6 +26,10 @@ const api = {
   // GET /api/admin/students?status=active&search=john
   fetchStudents: (params) =>
     API.get("/admin/students", { params }).then((r) => r.data).catch(toError),
+
+  // GET /api/admin/students/exam-activity → { exams, live, attempts }
+  fetchExamActivity: () =>
+    API.get("/admin/students/exam-activity").then((r) => r.data).catch(toError),
 
   // PUT /api/admin/students/:id
   updateStudent: (id, body) =>
@@ -51,6 +55,57 @@ const api = {
 };
 
 const PAGE_SIZE = 15;
+const ACTIVITY_REFRESH_MS = 30000;
+
+const EMPTY_ACTIVITY = { exams: [], live: [], attempts: [] };
+const NO_ACTIVITY    = { live: null, attempts: [] };
+
+const SORTS = {
+  newest:      "Newest joined",
+  oldest:      "Oldest joined",
+  name_asc:    "Name A–Z",
+  name_desc:   "Name Z–A",
+  id_asc:      "Student ID",
+  exam_recent: "Latest exam time",
+  score_desc:  "Highest score",
+};
+
+// "YYYY-MM-DD" in IST — same format as <input type="date">
+const istDay = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : "");
+
+const nameOf = (s) => s?.fullName || s?.name || "";
+
+const minutesSince = (iso) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+
+// What the student did in the exam / date currently filtered on
+const ActivityCell = ({ info, examFilter }) => {
+  if (info.live) {
+    return (
+      <div className="min-w-0">
+        <Badge tone="success" dot pulse>Writing · {info.live.subject}</Badge>
+        <p className="mt-1 text-xs text-slate-500">Started {formatTimeIST(info.live.startedAt)} · {minutesSince(info.live.startedAt)} min</p>
+      </div>
+    );
+  }
+  const a = info.attempts[0];
+  if (a) {
+    return (
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-slate-800">{a.subject || "Exam"}</span>
+          <ScoreBadge percentage={a.percentage} />
+        </div>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {formatDateTimeShortIST(a.submittedAt)}
+          {info.attempts.length > 1 && ` · +${info.attempts.length - 1} more`}
+        </p>
+      </div>
+    );
+  }
+  return examFilter
+    ? <Badge tone="warning">Not attempted</Badge>
+    : <span className="text-slate-400">—</span>;
+};
 
 const randomPassword = (chars) =>
   Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
@@ -360,7 +415,13 @@ const ViewStudents = () => {
 
   const [searchTerm,    setSearchTerm]    = useState("");
   const [statusFilter,  setStatusFilter]  = useState("");
+  const [examFilter,     setExamFilter]     = useState("");
+  const [activityFilter, setActivityFilter] = useState(""); // '' | 'live' | 'attempted' | 'not_attempted'
+  const [dateFilter,     setDateFilter]     = useState("");
+  const [sortBy,         setSortBy]         = useState("newest");
   const [page,          setPage]          = useState(1);
+
+  const [activity,      setActivity]      = useState(EMPTY_ACTIVITY);
 
   // Modal state — only one modal open at a time
   const [modal,           setModal]           = useState(null); // 'edit' | 'password' | 'delete' | 'bulk-password'
@@ -383,11 +444,31 @@ const ViewStudents = () => {
     loadStudents();
   }, [adminDepartment]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Activity failing shouldn't break the student list — it just stays empty
+  const loadActivity = async () => {
+    try {
+      const data = await api.fetchExamActivity();
+      setActivity({ ...EMPTY_ACTIVITY, ...data });
+    } catch (err) {
+      console.warn("[exam-activity]", err.message);
+    }
+  };
+
+  // Keep "Live now" fresh while the page is open
+  useEffect(() => {
+    if (!adminDepartment) return;
+    const id = setInterval(loadActivity, ACTIVITY_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [adminDepartment]);
+
   const loadStudents = async () => {
     setLoading(true);
     setLoadError("");
     try {
-      const data = await api.fetchStudents({ department: adminDepartment });
+      const [data] = await Promise.all([
+        api.fetchStudents({ department: adminDepartment }),
+        loadActivity(),
+      ]);
       setStudents(data.students || []);
     } catch (err) {
       setLoadError(err.message);
@@ -397,8 +478,45 @@ const ViewStudents = () => {
     }
   };
 
+  // ── Per-student exam activity, narrowed to the selected exam / date ──────────
+  const activityByStudent = new Map();
+  const infoFor = (id) => {
+    if (!activityByStudent.has(id)) activityByStudent.set(id, { live: null, attempts: [] });
+    return activityByStudent.get(id);
+  };
+  activity.live.forEach((l) => {
+    if (examFilter && String(l.examId) !== examFilter) return;
+    if (dateFilter && istDay(l.startedAt) !== dateFilter) return;
+    infoFor(String(l.studentId)).live = l;
+  });
+  activity.attempts.forEach((a) => {
+    if (examFilter && String(a.examId) !== examFilter) return;
+    if (dateFilter && istDay(a.submittedAt) !== dateFilter) return;
+    infoFor(String(a.studentId)).attempts.push(a);
+  });
+  activityByStudent.forEach((info) =>
+    info.attempts.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)));
+  const activityOf = (s) => activityByStudent.get(String(s._id)) || NO_ACTIVITY;
+
+  const lastExamTime = (s) => {
+    const info = activityOf(s);
+    if (info.live) return Date.now();
+    return info.attempts[0] ? new Date(info.attempts[0].submittedAt).getTime() : -Infinity;
+  };
+  const joinedTime = (s) => (s.createdAt ? new Date(s.createdAt).getTime() : 0);
+
+  const sorters = {
+    newest:      (a, b) => joinedTime(b) - joinedTime(a),
+    oldest:      (a, b) => joinedTime(a) - joinedTime(b),
+    name_asc:    (a, b) => nameOf(a).localeCompare(nameOf(b)),
+    name_desc:   (a, b) => nameOf(b).localeCompare(nameOf(a)),
+    id_asc:      (a, b) => (Number(a.studentId) || Infinity) - (Number(b.studentId) || Infinity),
+    exam_recent: (a, b) => lastExamTime(b) - lastExamTime(a),
+    score_desc:  (a, b) => (activityOf(b).attempts[0]?.percentage ?? -1) - (activityOf(a).attempts[0]?.percentage ?? -1),
+  };
+
   // ── Filtered list (client-side — all students are already dept-filtered by backend) ──
-  const filtered = students.filter((s) => {
+  const matchesBase = (s) => {
     const q = searchTerm.toLowerCase().trim();
     const matchSearch =
       !q ||
@@ -411,7 +529,26 @@ const ViewStudents = () => {
       !statusFilter || statusFilter === "All" || s.status === statusFilter;
 
     return matchSearch && matchStatus;
-  });
+  };
+
+  // 'live' | 'attempted' | 'not_attempted' for the selected exam / date
+  const activityKind = (s) => {
+    const info = activityOf(s);
+    if (info.live) return "live";
+    return info.attempts.length > 0 ? "attempted" : "not_attempted";
+  };
+
+  // Counts per activity, within the current search / status / exam / date
+  const baseStudents   = students.filter(matchesBase);
+  const activityCounts = { live: 0, attempted: 0, not_attempted: 0 };
+  baseStudents.forEach((s) => { activityCounts[activityKind(s)] += 1; });
+
+  const filtered = baseStudents.filter((s) => {
+    const kind = activityKind(s);
+    if (activityFilter) return kind === activityFilter;
+    // A date on its own means "who wrote an exam that day"
+    return dateFilter ? kind !== "not_attempted" : true;
+  }).sort(sorters[sortBy] || sorters.newest);
 
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -432,8 +569,16 @@ const ViewStudents = () => {
     showToast("Student deleted.");
   };
 
-  const clearFilters = () => { setSearchTerm(""); setStatusFilter(""); setPage(1); };
-  const activeFilters = [searchTerm, statusFilter].filter(Boolean).length;
+  const clearFilters = () => {
+    setSearchTerm(""); setStatusFilter(""); setExamFilter(""); setActivityFilter(""); setDateFilter(""); setSortBy("newest"); setPage(1);
+  };
+  const activeFilters = [searchTerm, statusFilter, examFilter, activityFilter, dateFilter].filter(Boolean).length;
+  const setFilter = (setter) => (e) => { setter(e.target.value); setPage(1); };
+
+  const studentById  = new Map(students.map((s) => [String(s._id), s]));
+  const liveSessions = activity.live
+    .filter((l) => studentById.has(String(l.studentId)))
+    .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
 
   const activeCount   = students.filter((s) => s.status === "active").length;
   const inactiveCount = students.filter((s) => s.status === "inactive").length;
@@ -456,11 +601,46 @@ const ViewStudents = () => {
         }
       />
 
-      <div className="mb-6 grid grid-cols-3 gap-3 sm:gap-4">
-        <StatCard label="Total students" value={students.length} icon={Users}     loading={initialLoad} />
-        <StatCard label="Active"         value={activeCount}     icon={UserCheck} tone="success" loading={initialLoad} />
-        <StatCard label="Inactive"       value={inactiveCount}   icon={UserX}     tone="danger" loading={initialLoad} />
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <StatCard label="Total students"   value={students.length}     icon={Users}     loading={initialLoad} />
+        <StatCard label="Active"           value={activeCount}         icon={UserCheck} tone="success" loading={initialLoad} />
+        <StatCard label="Inactive"         value={inactiveCount}       icon={UserX}     tone="danger" loading={initialLoad} />
+        <StatCard label="Writing exam now" value={liveSessions.length} icon={Radio}     tone="info" loading={initialLoad} />
       </div>
+
+      {liveSessions.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader
+            icon={Radio}
+            title={`Live now · ${liveSessions.length} writing`}
+            description="Updates every 30 seconds"
+            actions={
+              <Button size="sm" variant="secondary" onClick={() => { setActivityFilter("live"); setPage(1); }}>
+                Show in list
+              </Button>
+            }
+          />
+          <ul className="grid gap-2 p-4 pt-0 sm:grid-cols-2 xl:grid-cols-3">
+            {liveSessions.map((l) => {
+              const s = studentById.get(String(l.studentId));
+              return (
+                <li key={`${l.examId}-${l.studentId}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3">
+                  <Avatar name={nameOf(s)} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900">
+                      {nameOf(s)} <span className="font-mono text-xs text-slate-500">#{s.studentId ?? "N/A"}</span>
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {l.subject} · since {formatTimeIST(l.startedAt)} ({minutesSince(l.startedAt)} min)
+                    </p>
+                  </div>
+                  <Badge tone="success" dot pulse>Live</Badge>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
 
       <Card>
         <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center">
@@ -481,6 +661,50 @@ const ViewStudents = () => {
             <option value="inactive">Inactive</option>
           </Select>
           {activeFilters > 0 && <Button variant="ghost" icon={FilterX} onClick={clearFilters}>Clear</Button>}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Select value={examFilter} onChange={setFilter(setExamFilter)} aria-label="Filter by exam">
+            <option value="">All exams</option>
+            {activity.exams.map((e) => (
+              <option key={e._id} value={String(e._id)}>
+                {e.subject} · {formatDateIST(e.startTime)}{e.status === "active" ? " (live)" : ""}
+              </option>
+            ))}
+          </Select>
+          <Select value={activityFilter} onChange={setFilter(setActivityFilter)} aria-label="Filter by exam activity">
+            <option value="">Any exam activity</option>
+            <option value="live">Writing exam now ({activityCounts.live})</option>
+            <option value="attempted">Attempted ({activityCounts.attempted})</option>
+            <option value="not_attempted">Not attempted ({activityCounts.not_attempted})</option>
+          </Select>
+          <Input type="date" value={dateFilter} onChange={setFilter(setDateFilter)} aria-label="Exam date" title="Exam date (IST)" />
+          <Select value={sortBy} onChange={setFilter(setSortBy)} aria-label="Sort students">
+            {Object.entries(SORTS).map(([value, label]) => <option key={value} value={value}>Sort: {label}</option>)}
+          </Select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3 text-sm">
+          <span className="mr-1 text-slate-600">
+            <strong className="tabular text-slate-900">{filtered.length}</strong> of {students.length} students
+          </span>
+          {[
+            ["live",          "Writing now",   "success"],
+            ["attempted",     "Attempted",     "brand"],
+            ["not_attempted", "Not attempted", "warning"],
+          ].map(([kind, label, tone]) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => { setActivityFilter(activityFilter === kind ? "" : kind); setPage(1); }}
+              aria-pressed={activityFilter === kind}
+              className={activityFilter === kind ? "rounded-full ring-2 ring-brand-400" : "rounded-full"}
+            >
+              <Badge tone={tone} dot pulse={kind === "live" && activityCounts.live > 0}>
+                {label}: <span className="tabular font-semibold">{activityCounts[kind]}</span>
+              </Badge>
+            </button>
+          ))}
         </div>
 
         {initialLoad ? (
@@ -512,6 +736,7 @@ const ViewStudents = () => {
                     <th>ID</th>
                     <th>Student</th>
                     <th>Joined</th>
+                    <th>Exam activity</th>
                     <th>Status</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -536,6 +761,7 @@ const ViewStudents = () => {
                       <td className="whitespace-nowrap text-slate-500">
                         {student.joinDate || (student.createdAt ? formatDateIST(student.createdAt) : "—")}
                       </td>
+                      <td><ActivityCell info={activityOf(student)} examFilter={examFilter} /></td>
                       <td><StatusBadge status={student.status} /></td>
                       <td><RowActions student={student} openModal={openModal} /></td>
                     </tr>
@@ -556,6 +782,7 @@ const ViewStudents = () => {
                         <Badge className="font-mono">ID {student.studentId ?? "N/A"}</Badge>
                         <StatusBadge status={student.status} />
                       </div>
+                      <div className="mt-2"><ActivityCell info={activityOf(student)} examFilter={examFilter} /></div>
                     </div>
                   </div>
                   <RowActions student={student} compact openModal={openModal} />

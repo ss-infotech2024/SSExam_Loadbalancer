@@ -405,6 +405,18 @@ const ExamInterface = ({ exam, onExamEnd = () => {} }) => {
     };
   }, [phase, submitExam]);
 
+  // ── Heartbeat — tells the admin "All students" page this student is live ───
+  useEffect(() => {
+    if (phase !== "running" || !exam?._id) return;
+    const beat = () => {
+      if (examEndedRef.current) return;
+      API.post(`/student/exams/${exam._id}/heartbeat`).catch(() => {});
+    };
+    beat();
+    const id = setInterval(beat, 30000);
+    return () => clearInterval(id);
+  }, [phase, exam?._id]);
+
   // ── STEP 2: User clicks "Start Exam" ──────────────────────────────────────
   const handleStartExam = useCallback(async () => {
     // Camera OFF for this exam → no getUserMedia, no face-api, no detection loop.

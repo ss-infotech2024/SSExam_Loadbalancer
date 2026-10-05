@@ -2,13 +2,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchExamById, updateExam, clearSelected, clearActionError } from "../../store/slices/examSlices";
+import { fetchExamById, updateExam, clearSelected, clearActionError, downloadExamTemplate } from "../../store/slices/examSlices";
+import API from "@/services/api";
 import CameraProctoringToggle from "../../components/exam/CameraProctoringToggle";
+import ShuffleQuestionsToggle from "../../components/exam/ShuffleQuestionsToggle";
 import ExamDetailsFields from "../../components/exam/ExamDetailsFields";
 import QuestionEditorCard from "../../components/exam/QuestionEditorCard";
-import { ArrowLeft, Save, Plus, ListPlus, Lock, CalendarClock, ShieldCheck, Building2, Info } from "lucide-react";
 import {
-  PageHeader, Button, Card, CardHeader, Badge, Alert, EmptyState, ErrorState, LoadingState, useToast,
+  ArrowLeft, Save, Plus, ListPlus, Lock, CalendarClock, ShieldCheck, Building2, Info, FileSpreadsheet, Download,
+} from "lucide-react";
+import {
+  PageHeader, Button, Card, CardHeader, Badge, Alert, EmptyState, ErrorState, LoadingState, Modal, useToast,
 } from "../../components/ui";
 import { isoToLocalInput, localToIST_ISO } from "../../utils/time";
 
@@ -20,6 +24,57 @@ const makeQuestion = () => ({
   correctAnswer: null,
 });
 
+// ── Excel import modal: choose replace / append, or show the file's errors ──
+const ImportExcelModal = ({ result, currentCount, onReplace, onAppend, onClose }) => {
+  if (result.error) {
+    return (
+      <Modal
+        onClose={onClose}
+        icon={FileSpreadsheet}
+        title="Couldn't import this file"
+        description="Fix these rows in Excel and upload again. Nothing was changed."
+        footer={<Button variant="secondary" onClick={onClose}>Close</Button>}
+      >
+        <Alert tone="danger">{result.error.message}</Alert>
+        {result.error.errors?.length > 0 && (
+          <ul className="mt-3 max-h-64 list-disc space-y-1 overflow-y-auto pl-5 text-sm text-slate-700">
+            {result.error.errors.map((e) => <li key={e}>{e}</li>)}
+          </ul>
+        )}
+      </Modal>
+    );
+  }
+
+  const n = result.questions.length;
+  return (
+    <Modal
+      onClose={onClose}
+      icon={FileSpreadsheet}
+      title={`${n} question${n === 1 ? "" : "s"} found`}
+      description={result.fileName}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          {currentCount > 0 && <Button variant="secondary" icon={Plus} onClick={onAppend}>Add to end ({currentCount + n})</Button>}
+          <Button onClick={onReplace}>{currentCount > 0 ? `Replace all ${currentCount}` : "Load questions"}</Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {currentCount > 0 && (
+          <Alert tone="warning">
+            This exam has <strong>{currentCount}</strong> questions. <strong>Replace</strong> removes them and uses only the Excel questions;
+            <strong> Add to end</strong> keeps them and adds the new ones after.
+          </Alert>
+        )}
+        <p className="text-sm text-slate-600">
+          Questions load into the editor below so you can check them. Nothing is saved until you click <strong>Save changes</strong>.
+        </p>
+      </div>
+    </Modal>
+  );
+};
+
 // Map the fetched exam into form state (UTC → IST for the datetime inputs)
 const toFormState = (selected) => ({
   examData: {
@@ -28,6 +83,7 @@ const toFormState = (selected) => ({
     startTime: isoToLocalInput(selected.startTime),
     endTime:   isoToLocalInput(selected.endTime),
     cameraEnabled: selected.cameraEnabled !== false, // older exams have no field → ON
+    shuffleQuestions: selected.shuffleQuestions === true, // older exams have no field → OFF
   },
   marksPerQuestion: selected.marksPerQuestion ?? 1,
   questions: (selected.questions || []).map((q) => ({
@@ -62,7 +118,11 @@ const EditExam = () => {
   const [errors,           setErrors]           = useState({});
   const [loadedId,         setLoadedId]         = useState(null);
 
+  const [importing,        setImporting]        = useState(false);
+  const [importResult,     setImportResult]     = useState(null); // { fileName, questions } | { error }
+
   const questionRefs = useRef([]);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { if (actionError) showToast(actionError, "error"); }, [actionError, showToast]);
 
@@ -101,6 +161,57 @@ const EditExam = () => {
   };
 
   const removeQuestion = (lid) => setQuestions((p) => p.filter((q) => q.id !== lid));
+
+  // ── Excel import — same template as Create Exam (only the "Questions" sheet is read) ──
+  const handleExcelFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      showToast("Please choose an .xlsx file.", "error");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("examFile", file);
+      const res = await API.post("/admin/exams/questions/parse", fd);
+      setImportResult({ fileName: file.name, questions: res.data.questions || [] });
+    } catch (err) {
+      const data = err.response?.data;
+      setImportResult({
+        error: {
+          message: data?.message || err.message || "Failed to read the Excel file.",
+          errors:  Array.isArray(data?.errors) ? data.errors : [],
+        },
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const applyImport = (mode) => {
+    const imported = importResult.questions.map((q) => ({
+      _id:           null,
+      id:            Date.now() + Math.random(),
+      text:          q.text,
+      options:       [...q.options],
+      correctAnswer: q.correctAnswer,
+    }));
+    setQuestions((p) => (mode === "replace" ? imported : [...p, ...imported]));
+    setErrors((p) => Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith("q-"))));
+    setImportResult(null);
+    showToast(
+      `${imported.length} question${imported.length === 1 ? "" : "s"} ${mode === "replace" ? "loaded" : "added"} — click Save changes to keep them.`,
+      "success"
+    );
+  };
+
+  const handleDownloadTemplate = async () => {
+    const res = await dispatch(downloadExamTemplate());
+    if (res.meta.requestStatus === "rejected") showToast(res.payload || "Failed to download template", "error");
+  };
 
   const updateQuestion = (lid, field, value, optIdx = null) => {
     setQuestions((p) =>
@@ -156,6 +267,7 @@ const EditExam = () => {
       endTime:   localToIST_ISO(examData.endTime),
       // marksPerQuestion intentionally NOT sent — backend ignores it on update
       cameraEnabled: examData.cameraEnabled !== false,
+      shuffleQuestions: examData.shuffleQuestions === true,
       questions: questions.map((q) => ({
         text:          q.text.trim(),
         options:       q.options.map((o) => o.trim()),
@@ -228,10 +340,14 @@ const EditExam = () => {
 
         <Card>
           <CardHeader title="Proctoring" icon={ShieldCheck} />
-          <div className="card-body">
+          <div className="card-body space-y-4">
             <CameraProctoringToggle
               enabled={examData.cameraEnabled !== false}
               onChange={(v) => setExamData((p) => ({ ...p, cameraEnabled: v }))}
+            />
+            <ShuffleQuestionsToggle
+              enabled={examData.shuffleQuestions === true}
+              onChange={(v) => setExamData((p) => ({ ...p, shuffleQuestions: v }))}
             />
           </div>
         </Card>
@@ -241,7 +357,18 @@ const EditExam = () => {
             <div>
               <h2 className="text-base font-semibold text-slate-900">Questions <span className="font-normal text-slate-500">({questions.length})</span></h2>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" icon={Download} onClick={handleDownloadTemplate}>Template</Button>
+              <Button variant="secondary" icon={FileSpreadsheet} loading={importing} onClick={() => fileInputRef.current?.click()}>
+                {importing ? "Reading…" : "Import from Excel"}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={handleExcelFile}
+              />
               <Button variant="secondary" icon={Plus} onClick={addQuestion}>Add question</Button>
               <Button variant="secondary" icon={ListPlus} onClick={addTenQuestions}>Add 10</Button>
             </div>
@@ -283,6 +410,16 @@ const EditExam = () => {
           </div>
         </div>
       </div>
+
+      {importResult && (
+        <ImportExcelModal
+          result={importResult}
+          currentCount={questions.length}
+          onReplace={() => applyImport("replace")}
+          onAppend={() => applyImport("append")}
+          onClose={() => setImportResult(null)}
+        />
+      )}
     </>
   );
 };

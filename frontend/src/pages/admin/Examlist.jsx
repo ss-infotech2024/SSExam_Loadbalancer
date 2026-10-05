@@ -116,6 +116,7 @@ const ExamList = () => {
           endTime:          "",
           marksPerQuestion: full.marksPerQuestion ?? 1,
           cameraEnabled:    full.cameraEnabled !== false,
+          shuffleQuestions: full.shuffleQuestions === true,
         },
         questions: (full.questions || []).map((q) => ({
           id:            Date.now() + Math.random(),

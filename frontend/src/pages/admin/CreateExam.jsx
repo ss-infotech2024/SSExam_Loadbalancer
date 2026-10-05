@@ -13,6 +13,7 @@ import {
   Building2, Star, CalendarClock, Trash2, X, ListChecks,
 } from "lucide-react";
 import CameraProctoringToggle from "../../components/exam/CameraProctoringToggle";
+import ShuffleQuestionsToggle from "../../components/exam/ShuffleQuestionsToggle";
 import ExamDetailsFields from "../../components/exam/ExamDetailsFields";
 import QuestionEditorCard from "../../components/exam/QuestionEditorCard";
 import {
@@ -23,7 +24,7 @@ import { cn } from "../../utils/cn";
 import { loadDraft, saveDraft, clearDraft } from "../../utils/examDraft";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const EMPTY_EXAM    = { subject: "", duration: "", startTime: "", endTime: "", marksPerQuestion: "", cameraEnabled: true };
+const EMPTY_EXAM    = { subject: "", duration: "", startTime: "", endTime: "", marksPerQuestion: "", cameraEnabled: true, shuffleQuestions: false };
 const MARKS_OPTIONS = [1, 2, 3, 4, 5];
 const makeQuestion  = () => ({ id: Date.now() + Math.random(), text: "", options: ["", "", "", ""], correctAnswer: null });
 
@@ -376,6 +377,7 @@ const CreateExam = () => {
       endTime:          localToIST_ISO(examData.endTime),
       marksPerQuestion: Number(examData.marksPerQuestion),
       cameraEnabled:    examData.cameraEnabled !== false,
+      shuffleQuestions: examData.shuffleQuestions === true,
       questions: questions.map((q) => ({
         text:          q.text.trim(),
         options:       q.options.map((o) => o.trim()),
@@ -513,6 +515,10 @@ const CreateExam = () => {
               <CameraProctoringToggle
                 enabled={examData.cameraEnabled !== false}
                 onChange={(v) => setExamData((p) => ({ ...p, cameraEnabled: v }))}
+              />
+              <ShuffleQuestionsToggle
+                enabled={examData.shuffleQuestions === true}
+                onChange={(v) => setExamData((p) => ({ ...p, shuffleQuestions: v }))}
               />
               <Alert tone="info" icon={Building2}>
                 Only <strong>{adminDept}</strong> department students will see this exam.
